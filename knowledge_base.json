@@ -1,0 +1,26 @@
+[
+    {
+        "id": 1,
+        "question": "Kako mogu da vratim proizvod?",
+        "answer": "Povraćaj proizvoda je moguć u roku od 14 dana od prijema pošiljke. Proizvod mora biti neoštećen, u originalnom pakovanju.",
+        "keywords": "povraćaj, return, refund",
+        "category": "politike",
+        "source": "faq"
+    },
+    {
+        "id": 2,
+        "question": "Koliko košta dostava?",
+        "answer": "Dostava je besplatna za porudžbine preko 5000 RSD. Za porudžbine ispod ovog iznosa, dostava košta 300 RSD.",
+        "keywords": "dostava, shipping, poštarina",
+        "category": "dostava",
+        "source": "faq"
+    },
+    {
+        "id": 3,
+        "question": "Kako da proverim status moje porudžbine?",
+        "answer": "Status porudžbine možete proveriti na nekoliko načina: 1) Logujte se na svoj nalog na našem sajtu. 2) Kliknite na link iz email-a.",
+        "keywords": "status porudžbine, gde mi je paket",
+        "category": "porudžbine",
+        "source": "faq"
+    }
+]
