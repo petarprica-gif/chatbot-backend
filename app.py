@@ -16,15 +16,23 @@ logger = logging.getLogger(__name__)
 # Inicijalizacija chatbot-a
 chatbot = None
 
-@app.before_first_request
+# Inicijalizacija chatbot-a odmah pri pokretanju (ne čeka prvi zahtev)
+chatbot = None
+
 def initialize_chatbot():
     global chatbot
     api_key = os.environ.get('OPENAI_API_KEY')
     if api_key:
-        chatbot = ContextAwareChatbot(api_key)
-        logger.info("Chatbot inicijalizovan")
+        try:
+            chatbot = ContextAwareChatbot(api_key)
+            logger.info("Chatbot inicijalizovan")
+        except Exception as e:
+            logger.error(f"Greška pri inicijalizaciji chatbot-a: {str(e)}")
     else:
         logger.error("OPENAI_API_KEY nije postavljen")
+
+# Pozovi funkciju odmah pri pokretanju
+initialize_chatbot()
 
 @app.route('/health', methods=['GET'])
 def health_check():
