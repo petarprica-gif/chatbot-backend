@@ -6,12 +6,7 @@
 class SmartChatWidget {
     constructor(config) {
         this.config = {
-            primaryColor: '#007bff',
-            secondaryColor: '#6c757d',
-            position: 'bottom-right',
-            title: 'Korisnička podrška',
-            subtitle: 'Kako vam možemo pomoći?',
-            apiUrl: 'https://chatbot-backend-hcvx.onrender.com/webhook',  // <<< OVO PROMENITE KASNIJE
+                        apiUrl: 'https://chatbot-backend-hcvx.onrender.com/webhook',  // <<< OVO PROMENITE KASNIJE
             ...config
         };
         
