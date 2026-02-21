@@ -46,7 +46,7 @@ class ContextAwareChatbot:
         openai.api_key = api_key
         
         # Model za generisanje embedinga za semantičko pretraživanje [citation:3]
-        self.embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
+        self.embedding_model = SentenceTransformer('paraphrase-MiniLM-L3-v2')
         
         # Učitavanje baze znanja
         self.knowledge_base = self.load_knowledge_base(knowledge_base_path)
