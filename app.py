@@ -1,10 +1,13 @@
 import os
+import sys
 import logging
 from flask import Flask, request, jsonify, session
 from flask_cors import CORS
 from datetime import datetime
 import json
 from chatbot_core import ContextAwareChatbot
+print("=== 1. APP.PY POČINJE SA UČITAVANJEM ===", file=sys.stderr)
+sys.stderr.flush()
 
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', os.urandom(24))
