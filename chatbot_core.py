@@ -4,19 +4,15 @@ from typing import List, Dict, Any
 import json
 import os
 from datetime import datetime
-import redis
 from dataclasses import dataclass, asdict
 from enum import Enum
 import logging
+import traceback
 
 logger = logging.getLogger(__name__)
 
-# Inicijalizacija Redis-a za keširanje (opciono)
-redis_client = None
-try:
-    redis_client = redis.Redis(host='localhost', port=6379, db=0, decode_responses=True)
-except:
-    logger.warning("Redis nije dostupan, keširanje isključeno")
+# Redis je POTPUNO ISKLJUČEN - ne koristimo ga
+# Svi pokušaji povezivanja sa Redis-om su uklonjeni
 
 class Intent(Enum):
     GREETING = "greeting"
@@ -50,8 +46,9 @@ class ContextAwareChatbot:
         self.api_key = api_key
         openai.api_key = api_key
         
-        # NEMA vise sentence-transformers!
-        # Umesto toga, koristimo OpenAI API za embeddige
+        # NEMA Redis-a!
+        # NEMA sentence-transformers!
+        # Samo OpenAI API
         
         # Učitavanje baze znanja
         self.knowledge_base = self.load_knowledge_base(knowledge_base_path)
@@ -59,7 +56,7 @@ class ContextAwareChatbot:
         # Keširanje embedinga za brže pretraživanje (čuvaćemo u memoriji)
         self.embedding_cache = {}
         
-        # Aktivne konverzacije
+        # Aktivne konverzacije (čuvamo u RAM memoriji)
         self.active_conversations: Dict[str, ConversationMemory] = {}
         
         logger.info(f"Chatbot inicijalizovan sa {len(self.knowledge_base)} stavki u bazi znanja")
@@ -97,6 +94,7 @@ class ContextAwareChatbot:
             
         except Exception as e:
             logger.error(f"Greška pri generisanju embeddinga: {str(e)}")
+            logger.error(traceback.format_exc())
             # Vrati prazan vektor kao fallback (dimenzija 1536 za text-embedding-3-small)
             return [0.0] * 1536
     
@@ -139,13 +137,15 @@ class ContextAwareChatbot:
             # Za svaki unos, kreiraj tekst za embedding
             for item in data:
                 text_for_embedding = f"{item.get('question', '')} {item.get('answer', '')} {item.get('keywords', '')}"
-                # Embedding ćemo generisati na zahtev, ne unapred
                 item['text_for_embedding'] = text_for_embedding
             
             logger.info(f"Učitano {len(data)} stavki u bazu znanja")
             return data
         except FileNotFoundError:
             logger.warning("Baza znanja nije pronađena, kreiram praznu")
+            return []
+        except Exception as e:
+            logger.error(f"Greška pri učitavanju baze znanja: {str(e)}")
             return []
     
     def retrieve_relevant_knowledge(self, query: str, top_k: int = 3) -> List[Dict]:
@@ -164,38 +164,42 @@ class ContextAwareChatbot:
         if not self.knowledge_base:
             return []
         
-        # Generiši embedding za upit
-        query_embedding = self.get_embedding(query)
-        
-        # Izračunaj sličnosti
-        similarities = []
-        for idx, item in enumerate(self.knowledge_base):
-            # Generiši embedding za stavku ako već nije u kešu
-            item_text = item.get('text_for_embedding', '')
-            item_key = f"kb_{idx}"
+        try:
+            # Generiši embedding za upit
+            query_embedding = self.get_embedding(query)
             
-            if item_key not in self.embedding_cache:
-                self.embedding_cache[item_key] = self.get_embedding(item_text)
+            # Izračunaj sličnosti
+            similarities = []
+            for idx, item in enumerate(self.knowledge_base):
+                # Generiši embedding za stavku ako već nije u kešu
+                item_text = item.get('text_for_embedding', '')
+                item_key = f"kb_{idx}"
+                
+                if item_key not in self.embedding_cache:
+                    self.embedding_cache[item_key] = self.get_embedding(item_text)
+                
+                item_embedding = self.embedding_cache[item_key]
+                
+                # Izračunaj sličnost
+                similarity = self.cosine_similarity(query_embedding, item_embedding)
+                similarities.append((similarity, idx, item))
             
-            item_embedding = self.embedding_cache[item_key]
+            # Sortiraj po sličnosti (opadajuće) i uzmi top_k
+            similarities.sort(reverse=True, key=lambda x: x[0])
             
-            # Izračunaj sličnost
-            similarity = self.cosine_similarity(query_embedding, item_embedding)
-            similarities.append((similarity, idx, item))
-        
-        # Sortiraj po sličnosti (opadajuće) i uzmi top_k
-        similarities.sort(reverse=True, key=lambda x: x[0])
-        
-        relevant_items = []
-        for i in range(min(top_k, len(similarities))):
-            if similarities[i][0] > 0.5:  # Prag relevantnosti (možete prilagoditi)
-                relevant_items.append({
-                    'content': similarities[i][2],
-                    'relevance_score': float(similarities[i][0]),
-                    'source': similarities[i][2].get('source', 'knowledge_base')
-                })
-        
-        return relevant_items
+            relevant_items = []
+            for i in range(min(top_k, len(similarities))):
+                if similarities[i][0] > 0.5:  # Prag relevantnosti (možete prilagoditi)
+                    relevant_items.append({
+                        'content': similarities[i][2],
+                        'relevance_score': float(similarities[i][0]),
+                        'source': similarities[i][2].get('source', 'knowledge_base')
+                    })
+            
+            return relevant_items
+        except Exception as e:
+            logger.error(f"Greška u retrieve_relevant_knowledge: {str(e)}")
+            return []
     
     def detect_intent(self, message: str, conversation_history: List[Dict]) -> Intent:
         """
@@ -230,7 +234,7 @@ class ContextAwareChatbot:
         
         try:
             response = openai.ChatCompletion.create(
-                model="gpt-3.5-turbo",  # Možete koristiti i gpt-4 ako želite
+                model="gpt-3.5-turbo",
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": f"Istorija:\n{history_text}\n\nTrenutna poruka: {message}"}
@@ -269,115 +273,127 @@ class ContextAwareChatbot:
             Dict sa odgovorom i metapodacima
         """
         
-        # Dohvati ili kreiraj memoriju konverzacije
-        memory_key = f"{user_id}:{conversation_id}" if conversation_id else user_id
-        conversation = self.get_or_create_conversation(memory_key, user_id, channel)
-        
-        # Detektuj nameru
-        intent = self.detect_intent(message, conversation.messages)
-        
-        # Proveri da li je potrebna eskalacija
-        if self.should_escalate(message, intent, conversation):
-            conversation.escalation_needed = True
-            return self.prepare_escalation(message, conversation)
-        
-        # Pronađi relevantne informacije iz baze znanja
-        relevant_knowledge = self.retrieve_relevant_knowledge(message)
-        
-        # Pripremi kontekst za generisanje odgovora
-        context = {
-            'intent': intent.value,
-            'relevant_knowledge': relevant_knowledge,
-            'user_id': user_id,
-            'channel': channel,
-            'conversation_history': conversation.messages[-10:],
-            'user_context': conversation.context
-        }
-        
-        # Generiši odgovor koristeći OpenAI sa kontekstom
-        response_text = self.generate_llm_response(message, context)
-        
-        # Sačuvaj poruke u memoriju
-        self.add_to_conversation(memory_key, {
-            'role': 'user',
-            'content': message,
-            'timestamp': datetime.now().isoformat()
-        })
-        
-        self.add_to_conversation(memory_key, {
-            'role': 'assistant',
-            'content': response_text,
-            'timestamp': datetime.now().isoformat(),
-            'intent': intent.value,
-            'knowledge_used': [k['source'] for k in relevant_knowledge] if relevant_knowledge else []
-        })
-        
-        # Pripremi odgovor
-        response = {
-            'response': response_text,
-            'intent': intent.value,
-            'conversation_id': conversation_id,
-            'escalation_needed': False,
-            'knowledge_sources': [k['source'] for k in relevant_knowledge] if relevant_knowledge else [],
-            'channel_specific': self.get_channel_specific_response(channel, response_text)
-        }
-        
-        return response
+        try:
+            # Dohvati ili kreiraj memoriju konverzacije
+            memory_key = f"{user_id}:{conversation_id}" if conversation_id else user_id
+            conversation = self.get_or_create_conversation(memory_key, user_id, channel)
+            
+            # Detektuj nameru
+            intent = self.detect_intent(message, conversation.messages)
+            
+            # Proveri da li je potrebna eskalacija
+            if self.should_escalate(message, intent, conversation):
+                conversation.escalation_needed = True
+                return self.prepare_escalation(message, conversation)
+            
+            # Pronađi relevantne informacije iz baze znanja
+            relevant_knowledge = self.retrieve_relevant_knowledge(message)
+            
+            # Pripremi kontekst za generisanje odgovora
+            context = {
+                'intent': intent.value,
+                'relevant_knowledge': relevant_knowledge,
+                'user_id': user_id,
+                'channel': channel,
+                'conversation_history': conversation.messages[-10:],
+                'user_context': conversation.context
+            }
+            
+            # Generiši odgovor koristeći OpenAI sa kontekstom
+            response_text = self.generate_llm_response(message, context)
+            
+            # Sačuvaj poruke u memoriju
+            self.add_to_conversation(memory_key, {
+                'role': 'user',
+                'content': message,
+                'timestamp': datetime.now().isoformat()
+            })
+            
+            self.add_to_conversation(memory_key, {
+                'role': 'assistant',
+                'content': response_text,
+                'timestamp': datetime.now().isoformat(),
+                'intent': intent.value,
+                'knowledge_used': [k['source'] for k in relevant_knowledge] if relevant_knowledge else []
+            })
+            
+            # Pripremi odgovor
+            response = {
+                'response': response_text,
+                'intent': intent.value,
+                'conversation_id': conversation_id,
+                'escalation_needed': False,
+                'knowledge_sources': [k['source'] for k in relevant_knowledge] if relevant_knowledge else [],
+                'channel_specific': self.get_channel_specific_response(channel, response_text)
+            }
+            
+            return response
+            
+        except Exception as e:
+            logger.error(f"Greška u generate_response: {str(e)}")
+            logger.error(traceback.format_exc())
+            return {
+                'response': "Došlo je do tehničke greške. Molim vas pokušajte ponovo ili kontaktirajte podršku.",
+                'intent': 'unknown',
+                'conversation_id': conversation_id,
+                'escalation_needed': True,
+                'knowledge_sources': []
+            }
     
     def generate_llm_response(self, message: str, context: Dict) -> str:
         """
         Generiše odgovor koristeći OpenAI sa ugrađenim kontekstom
         """
         
-        # Pripremi kontekst iz baze znanja
-        knowledge_text = ""
-        if context['relevant_knowledge']:
-            knowledge_text = "Relevantne informacije:\n"
-            for idx, item in enumerate(context['relevant_knowledge']):
-                content = item['content']
-                knowledge_text += f"{idx+1}. Pitanje: {content.get('question', 'Informacija')}\n"
-                knowledge_text += f"   Odgovor: {content.get('answer', content.get('content', ''))}\n"
-                knowledge_text += f"   Izvor: {content.get('source', 'baza znanja')}\n\n"
-        
-        # Pripremi istoriju razgovora
-        history_text = ""
-        if context['conversation_history']:
-            history_text = "Istorija razgovora:\n"
-            for msg in context['conversation_history']:
-                role = "Korisnik" if msg['role'] == 'user' else "Asistent"
-                history_text += f"{role}: {msg['content']}\n"
-        
-        # System prompt za asistenta
-        system_prompt = f"""
-        Ti si profesionalni AI asistent za korisničku podršku i e-trgovinu.
-        
-        VAŽNA UPUTSTVA:
-        1. Budi koncizan, ali ljubazan - koristi prirodan ton razgovora
-        2. Odgovaraj isključivo na osnovu dostupnih informacija - ako ne znaš odgovor, priznaj to
-        3. Izbegavaj halucinacije - nemoj izmišljati informacije koje nisu u bazi znanja
-        4. Ako korisnik pita nešto što nije u tvojoj bazi znanja, ljubazno ga uputi da ćeš proslediti agentu
-        5. Strukturiraj informacije jasno - koristi bullet points gde je prikladno
-        6. Prati kontekst razgovora - ako se korisnik vraća na prethodnu temu, seti se toga
-        
-        Detektovana namera korisnika: {context['intent']}
-        Kanal komunikacije: {context['channel']}
-        """
-        
-        # Korisnički prompt sa svim informacijama
-        user_prompt = f"""
-        {history_text}
-        
-        {knowledge_text}
-        
-        Korisnik pita: {message}
-        
-        Molim te da odgovoriš na ovo pitanje na osnovu dostupnih informacija.
-        Ako informacija nije dostupna, reci da ćeš proslediti agentu.
-        """
-        
         try:
+            # Pripremi kontekst iz baze znanja
+            knowledge_text = ""
+            if context['relevant_knowledge']:
+                knowledge_text = "Relevantne informacije:\n"
+                for idx, item in enumerate(context['relevant_knowledge']):
+                    content = item['content']
+                    knowledge_text += f"{idx+1}. Pitanje: {content.get('question', 'Informacija')}\n"
+                    knowledge_text += f"   Odgovor: {content.get('answer', content.get('content', ''))}\n"
+                    knowledge_text += f"   Izvor: {content.get('source', 'baza znanja')}\n\n"
+            
+            # Pripremi istoriju razgovora
+            history_text = ""
+            if context['conversation_history']:
+                history_text = "Istorija razgovora:\n"
+                for msg in context['conversation_history']:
+                    role = "Korisnik" if msg['role'] == 'user' else "Asistent"
+                    history_text += f"{role}: {msg['content']}\n"
+            
+            # System prompt za asistenta
+            system_prompt = f"""
+            Ti si profesionalni AI asistent za korisničku podršku i e-trgovinu.
+            
+            VAŽNA UPUTSTVA:
+            1. Budi koncizan, ali ljubazan - koristi prirodan ton razgovora
+            2. Odgovaraj isključivo na osnovu dostupnih informacija - ako ne znaš odgovor, priznaj to
+            3. Izbegavaj halucinacije - nemoj izmišljati informacije koje nisu u bazi znanja
+            4. Ako korisnik pita nešto što nije u tvojoj bazi znanja, ljubazno ga uputi da ćeš proslediti agentu
+            5. Strukturiraj informacije jasno - koristi bullet points gde je prikladno
+            6. Prati kontekst razgovora - ako se korisnik vraća na prethodnu temu, seti se toga
+            
+            Detektovana namera korisnika: {context['intent']}
+            Kanal komunikacije: {context['channel']}
+            """
+            
+            # Korisnički prompt sa svim informacijama
+            user_prompt = f"""
+            {history_text}
+            
+            {knowledge_text}
+            
+            Korisnik pita: {message}
+            
+            Molim te da odgovoriš na ovo pitanje na osnovu dostupnih informacija.
+            Ako informacija nije dostupna, reci da ćeš proslediti agentu.
+            """
+            
             response = openai.ChatCompletion.create(
-                model="gpt-3.5-turbo",  # Možete koristiti i "gpt-4" ako želite
+                model="gpt-3.5-turbo",
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt}
@@ -387,6 +403,7 @@ class ContextAwareChatbot:
             )
             
             return response.choices[0].message.content.strip()
+            
         except Exception as e:
             logger.error(f"Greška pri generisanju odgovora: {str(e)}")
             return "Izvinite, došlo je do tehničke greške. Molim vas pokušajte ponovo ili kontaktirajte našu podršku."
@@ -452,23 +469,7 @@ class ContextAwareChatbot:
         if memory_key in self.active_conversations:
             return self.active_conversations[memory_key]
         
-        # Proveri Redis keš ako postoji
-        if redis_client:
-            cached = redis_client.get(f"conversation:{memory_key}")
-            if cached:
-                data = json.loads(cached)
-                conversation = ConversationMemory(
-                    user_id=data['user_id'],
-                    messages=data['messages'],
-                    last_updated=datetime.fromisoformat(data['last_updated']),
-                    context=data.get('context', {}),
-                    sentiment=data.get('sentiment', 0.0),
-                    escalation_needed=data.get('escalation_needed', False)
-                )
-                self.active_conversations[memory_key] = conversation
-                return conversation
-        
-        # Kreiraj novu konverzaciju
+        # Kreiraj novu konverzaciju (NEMA Redis-a!)
         conversation = ConversationMemory(
             user_id=user_id,
             messages=[],
@@ -493,23 +494,8 @@ class ContextAwareChatbot:
         if 'intent' in message:
             conversation.context['last_intent'] = message['intent']
         
-        # Sačuvaj u Redis ako postoji
-        if redis_client:
-            try:
-                redis_client.setex(
-                    f"conversation:{memory_key}",
-                    86400,
-                    json.dumps({
-                        'user_id': conversation.user_id,
-                        'messages': conversation.messages,
-                        'last_updated': conversation.last_updated.isoformat(),
-                        'context': conversation.context,
-                        'sentiment': conversation.sentiment,
-                        'escalation_needed': conversation.escalation_needed
-                    })
-                )
-            except:
-                pass
+        # NEMA Redis čuvanja - samo u RAM memoriji
+        # Ovo je OK za manji broj korisnika
     
     def get_channel_specific_response(self, channel: str, text: str = None, escalation: bool = False) -> Dict:
         """
