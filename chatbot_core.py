@@ -3,6 +3,7 @@ import numpy as np
 from typing import List, Dict, Any
 import json
 import os
+import re
 from datetime import datetime
 from dataclasses import dataclass, asdict
 from enum import Enum
@@ -22,6 +23,7 @@ class Intent(Enum):
     PAYMENT_ISSUE = "payment_issue"
     CONTACT_SUPPORT = "contact_support"
     FAREWELL = "farewell"
+    PRODUCT_RECOMMENDATION = "product_recommendation"  # NOVO
     UNKNOWN = "unknown"
 
 @dataclass
@@ -218,6 +220,7 @@ class ContextAwareChatbot:
         odredi koja je od sledećih namera najverovatnija:
         - greeting: Pozdrav, početak razgovora
         - product_question: Pitanje o proizvodu (cena, dostupnost, karakteristike)
+        - product_recommendation: Zahtev za preporuku proizvoda na osnovu kriterijuma (npr. "preporuči mi skuter sa dometom 100 km", "koji model da kupim", "šta mi preporučuješ")
         - order_status: Provera statusa porudžbine
         - return_request: Zahtev za povraćaj ili reklamaciju
         - payment_issue: Problem sa plaćanjem
@@ -255,6 +258,178 @@ class ContextAwareChatbot:
             logger.error(f"Greška pri detekciji namere: {str(e)}")
             return Intent.UNKNOWN
     
+    # NOVA FUNKCIJA: Filtriranje modela po kriterijumima
+    def filter_models_by_criteria(self, criteria: Dict[str, any]) -> List[Dict]:
+        """
+        Filtrira modele iz baze znanja na osnovu zadatih kriterijuma.
+        
+        Args:
+            criteria: Rečnik sa kriterijumima, npr:
+                    {
+                        'kategorija': 'motocikli',  # ili 'skuteri'
+                        'max_snaga': 11,
+                        'min_domet': 180,
+                        'max_domet': 230,
+                        'kategorija_vozacke': 'A1',
+                        'prenosna_baterija': True
+                    }
+        
+        Returns:
+            Lista modela koji ispunjavaju kriterijume
+        """
+        filtered_models = []
+        
+        for item in self.knowledge_base:
+            # Proveri da li je unos proizvod (ima polje 'source' == 'proizvodi')
+            if item.get('source') != 'proizvodi':
+                continue
+                
+            # Provera kategorije (skuteri/motocikli) ako je zadata
+            if 'kategorija' in criteria and criteria['kategorija'] and item.get('category') != criteria['kategorija']:
+                continue
+                
+            # Provera kriterijuma iz odgovora
+            answer = item.get('answer', '').lower()
+            
+            # Provera kategorije vozačke dozvole
+            if 'kategorija_vozacke' in criteria and criteria['kategorija_vozacke']:
+                vozacka = criteria['kategorija_vozacke'].lower()
+                if vozacka == 'am' and 'am kategorija' not in answer:
+                    continue
+                if vozacka == 'a1' and 'a1 kategorija' not in answer:
+                    continue
+            
+            # Provera dometa
+            domet_match = re.search(r'domet do (\d+) km', answer)
+            if domet_match:
+                domet = int(domet_match.group(1))
+                if 'min_domet' in criteria and criteria['min_domet'] and domet < criteria['min_domet']:
+                    continue
+                if 'max_domet' in criteria and criteria['max_domet'] and domet > criteria['max_domet']:
+                    continue
+            
+            # Provera snage
+            snaga_match = re.search(r'snagu ([\d\.]+) kw', answer)
+            if snaga_match:
+                snaga = float(snaga_match.group(1))
+                if 'max_snaga' in criteria and criteria['max_snaga'] and snaga > criteria['max_snaga']:
+                    continue
+            
+            # Provera prenosivosti baterije
+            if 'prenosna_baterija' in criteria and criteria['prenosna_baterija'] is not None:
+                baterija_prenosna = 'prenosna' in answer or 'prenosna baterija' in answer
+                if criteria['prenosna_baterija'] and not baterija_prenosna:
+                    continue
+                if not criteria['prenosna_baterija'] and baterija_prenosna:
+                    continue
+            
+            # Ako je prošao sve filtere, dodaj u listu
+            filtered_models.append(item)
+        
+        return filtered_models
+    
+    # NOVA FUNKCIJA: Izdvajanje kriterijuma iz poruke
+    def extract_criteria_from_message(self, message: str) -> Dict[str, any]:
+        """
+        Koristi OpenAI da iz poruke izdvoji kriterijume za preporuku.
+        
+        Args:
+            message: Korisnička poruka
+        
+        Returns:
+            Rečnik sa kriterijumima
+        """
+        criteria_prompt = f"""
+        Na osnovu korisničkog pitanja: "{message}"
+        Izdvoj kriterijume za preporuku električnog skutera/motocikla.
+        Vrati SAMO JSON u formatu:
+        {{
+            "kategorija": "skuteri" ili "motocikli" ili null,
+            "min_domet": broj u km ili null,
+            "max_domet": broj u km ili null,
+            "max_snaga": broj u kW ili null,
+            "kategorija_vozacke": "AM" ili "A1" ili null,
+            "prenosna_baterija": true ili false ili null
+        }}
+        Ako neki kriterijum nije pomenut, vrati null.
+        Vrati SAMO JSON, ništa drugo.
+        """
+        
+        try:
+            response = openai.ChatCompletion.create(
+                model="gpt-3.5-turbo",
+                messages=[
+                    {"role": "system", "content": criteria_prompt},
+                    {"role": "user", "content": message}
+                ],
+                max_tokens=200,
+                temperature=0.3
+            )
+            
+            criteria_text = response.choices[0].message.content.strip()
+            # Očisti JSON ako ima markdowna
+            if criteria_text.startswith('```json'):
+                criteria_text = criteria_text.replace('```json', '').replace('```', '')
+            if criteria_text.startswith('```'):
+                criteria_text = criteria_text.replace('```', '')
+            
+            criteria = json.loads(criteria_text)
+            logger.info(f"Izdvojeni kriterijumi: {criteria}")
+            return criteria
+            
+        except Exception as e:
+            logger.error(f"Greška pri izdvajanju kriterijuma: {str(e)}")
+            return {}
+    
+    # NOVA FUNKCIJA: Generisanje odgovora sa preporukama
+    def generate_recommendation_response(self, message: str, criteria: Dict[str, any]) -> str:
+        """
+        Generiše odgovor sa preporukama na osnovu kriterijuma.
+        
+        Args:
+            message: Originalna poruka korisnika
+            criteria: Izdvojeni kriterijumi
+        
+        Returns:
+            Tekst odgovora sa preporukama
+        """
+        # Filtriraj modele
+        matching_models = self.filter_models_by_criteria(criteria)
+        
+        if not matching_models:
+            return "Nažalost, trenutno nemamo modele koji u potpunosti odgovaraju tvojim kriterijumima. Preporučujem ti da pogledaš našu ponudu na sajtu ili da nas kontaktiraš za dodatnu pomoć."
+        
+        # Pripremi listu modela za prikaz
+        models_text = ""
+        for i, model in enumerate(matching_models[:5], 1):  # Maksimalno 5 modela
+            # Izvuci naziv modela iz pitanja
+            question = model.get('question', '')
+            model_name = question.replace("Koje su karakteristike ", "").replace("?", "").strip()
+            
+            # Izvuci ključne karakteristike iz odgovora
+            answer = model.get('answer', '')
+            
+            # Izvuci domet
+            domet_match = re.search(r'domet do (\d+) km', answer)
+            domet = domet_match.group(1) if domet_match else "nepoznat"
+            
+            # Izvuci snagu
+            snaga_match = re.search(r'snagu ([\d\.]+) kw', answer)
+            snaga = snaga_match.group(1) if snaga_match else "nepoznata"
+            
+            # Izvuci kategoriju vozačke
+            vozacka = "AM" if "am kategorija" in answer.lower() else "A1" if "a1 kategorija" in answer.lower() else "nepoznata"
+            
+            # Izvuci link
+            link_match = re.search(r"<a href='([^']+)'", answer)
+            link = link_match.group(1) if link_match else "#"
+            
+            models_text += f"\n\n{i}. **{model_name}**\n   - Snaga: {snaga} kW\n   - Domet: {domet} km\n   - Kategorija: {vozacka}\n   - Detaljnije: {link}"
+        
+        response_text = f"Na osnovu tvojih kriterijuma, preporučujem sledeće modele:{models_text}\n\nAko želiš više informacija o nekom modelu, slobodno pitaj!"
+        
+        return response_text
+    
     def generate_response(self, 
                          message: str, 
                          user_id: str, 
@@ -280,12 +455,43 @@ class ContextAwareChatbot:
             
             # Detektuj nameru
             intent = self.detect_intent(message, conversation.messages)
+            logger.info(f"Detektovana namera: {intent}")
             
             # Proveri da li je potrebna eskalacija
             if self.should_escalate(message, intent, conversation):
                 conversation.escalation_needed = True
                 return self.prepare_escalation(message, conversation)
             
+            # NOVO: Obrada preporuka
+            if intent == Intent.PRODUCT_RECOMMENDATION:
+                criteria = self.extract_criteria_from_message(message)
+                response_text = self.generate_recommendation_response(message, criteria)
+                
+                # Sačuvaj poruke u memoriju
+                self.add_to_conversation(memory_key, {
+                    'role': 'user',
+                    'content': message,
+                    'timestamp': datetime.now().isoformat()
+                })
+                
+                self.add_to_conversation(memory_key, {
+                    'role': 'assistant',
+                    'content': response_text,
+                    'timestamp': datetime.now().isoformat(),
+                    'intent': intent.value,
+                    'knowledge_used': []
+                })
+                
+                return {
+                    'response': response_text,
+                    'intent': intent.value,
+                    'conversation_id': conversation_id,
+                    'escalation_needed': False,
+                    'knowledge_sources': [],
+                    'channel_specific': self.get_channel_specific_response(channel, response_text)
+                }
+            
+            # Za ostale namere, koristi standardnu pretragu
             # Pronađi relevantne informacije iz baze znanja
             relevant_knowledge = self.retrieve_relevant_knowledge(message)
             
