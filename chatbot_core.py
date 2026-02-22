@@ -214,13 +214,28 @@ class ContextAwareChatbot:
         Returns:
             Detektovana namera
         """
+        # Prvo proveri da li je u pitanju nastavak preporuke (kontekst)
+        if conversation_history and len(conversation_history) > 0:
+            last_assistant_msg = None
+            for msg in reversed(conversation_history):
+                if msg['role'] == 'assistant':
+                    last_assistant_msg = msg
+                    break
+            
+            # Ako je poslednja poruka bila preporuka, a korisnik odbija
+            if last_assistant_msg and last_assistant_msg.get('intent') == 'product_recommendation':
+                rejection_keywords = ['ne sviđa', 'drugi', 'neki drugi', 'drugačiji', 'neću', 'ne želim', 'nemoj']
+                if any(keyword in message.lower() for keyword in rejection_keywords):
+                    logger.info("Prepoznato odbijanje preporuke, ostajem u PRODUCT_RECOMMENDATION modu")
+                    return Intent.PRODUCT_RECOMMENDATION
+        
         # Pravimo prompt za OpenAI sa kontekstom
         system_prompt = """
         Ti si AI asistent za detekciju namere. Na osnovu korisničke poruke i istorije razgovora,
         odredi koja je od sledećih namera najverovatnija:
         - greeting: Pozdrav, početak razgovora
         - product_question: Pitanje o proizvodu (cena, dostupnost, karakteristike)
-        - product_recommendation: Zahtev za preporuku proizvoda na osnovu kriterijuma (npr. "preporuči mi skuter sa dometom 100 km", "koji model da kupim", "šta mi preporučuješ")
+        - product_recommendation: Zahtev za preporuku proizvoda na osnovu kriterijuma (npr. "preporuči mi skuter sa dometom 100 km", "koji model da kupim", "šta mi preporučuješ", "tražim nešto za grad")
         - order_status: Provera statusa porudžbine
         - return_request: Zahtev za povraćaj ili reklamaciju
         - payment_issue: Problem sa plaćanjem
@@ -294,9 +309,14 @@ class ContextAwareChatbot:
             # Provera kategorije vozačke dozvole
             if 'kategorija_vozacke' in criteria and criteria['kategorija_vozacke']:
                 vozacka = criteria['kategorija_vozacke'].lower()
-                if vozacka == 'am' and 'am kategorija' not in answer:
-                    continue
-                if vozacka == 'a1' and 'a1 kategorija' not in answer:
+                if vozacka == 'am':
+                    # AM kategorija - svi skuteri su po definiciji AM, ali proveri da nije motocikl
+                    if 'a1 kategorija' in answer:
+                        continue
+                    # Takođe proveri da li je u pitanju skuter (kategorija)
+                    if item.get('category') != 'skuteri' and 'skuter' not in answer:
+                        continue
+                elif vozacka == 'a1' and 'a1 kategorija' not in answer:
                     continue
             
             # Provera dometa
@@ -308,11 +328,17 @@ class ContextAwareChatbot:
                 if 'max_domet' in criteria and criteria['max_domet'] and domet > criteria['max_domet']:
                     continue
             
-            # Provera snage
+            # Provera snage - POBOLJŠANO
             snaga_match = re.search(r'snagu ([\d\.]+) kw', answer)
-            if snaga_match:
+            if not snaga_match:
+                snaga_match = re.search(r'(\d+(?:\.\d+)?)\s*kw', answer)
+            if not snaga_match and 'max_snaga' in criteria and criteria['max_snaga']:
+                # Ako nema podatka o snazi, ali je kriterijum zadat, ipak dodaj model
+                # jer možda drugi kriterijumi ispunjavaju
+                pass
+            elif snaga_match and 'max_snaga' in criteria and criteria['max_snaga']:
                 snaga = float(snaga_match.group(1))
-                if 'max_snaga' in criteria and criteria['max_snaga'] and snaga > criteria['max_snaga']:
+                if snaga > criteria['max_snaga']:
                     continue
             
             # Provera prenosivosti baterije
@@ -382,26 +408,46 @@ class ContextAwareChatbot:
             return {}
     
     # NOVA FUNKCIJA: Generisanje odgovora sa preporukama
-    def generate_recommendation_response(self, message: str, criteria: Dict[str, any]) -> str:
+    def generate_recommendation_response(self, message: str, criteria: Dict[str, any], conversation_history: List[Dict]) -> str:
         """
         Generiše odgovor sa preporukama na osnovu kriterijuma.
         
         Args:
             message: Originalna poruka korisnika
             criteria: Izdvojeni kriterijumi
+            conversation_history: Istorija razgovora za kontekst
         
         Returns:
             Tekst odgovora sa preporukama
         """
+        # Proveri da li je ovo nastavak prethodne preporuke
+        previous_models = []
+        if conversation_history:
+            for msg in reversed(conversation_history):
+                if msg.get('intent') == 'product_recommendation' and 'recommended_models' in msg:
+                    previous_models = msg.get('recommended_models', [])
+                    break
+        
         # Filtriraj modele
         matching_models = self.filter_models_by_criteria(criteria)
         
+        # Ako imamo prethodne modele, izbaci ih iz preporuke
+        if previous_models and matching_models:
+            matching_models = [m for m in matching_models if m.get('id') not in previous_models]
+        
         if not matching_models:
-            return "Nažalost, trenutno nemamo modele koji u potpunosti odgovaraju tvojim kriterijumima. Preporučujem ti da pogledaš našu ponudu na sajtu ili da nas kontaktiraš za dodatnu pomoć."
+            if previous_models:
+                return "Razumem. Nažalost, trenutno nemamo druge modele koji odgovaraju tvojim kriterijumima. Preporučujem ti da pogledaš našu kompletnu ponudu na sajtu: https://zapmoto.rs/proizvodi/ ili da mi kažeš koji su ti drugi kriterijumi važni (npr. niža cena, manji domet, prenosiva baterija...)."
+            else:
+                return "Nažalost, trenutno nemamo modele koji u potpunosti odgovaraju tvojim kriterijumima. Preporučujem ti da pogledaš našu ponudu na sajtu: https://zapmoto.rs/proizvodi/ ili da nas kontaktiraš za dodatnu pomoć."
         
         # Pripremi listu modela za prikaz
         models_text = ""
+        recommended_ids = []
         for i, model in enumerate(matching_models[:5], 1):  # Maksimalno 5 modela
+            # Sačuvaj ID za eventualno naknadno filtriranje
+            recommended_ids.append(model.get('id'))
+            
             # Izvuci naziv modela iz pitanja
             question = model.get('question', '')
             model_name = question.replace("Koje su karakteristike ", "").replace("?", "").strip()
@@ -409,26 +455,30 @@ class ContextAwareChatbot:
             # Izvuci ključne karakteristike iz odgovora
             answer = model.get('answer', '')
             
-            # Izvuci domet
+            # Izvuci domet - POBOLJŠANO
             domet_match = re.search(r'domet do (\d+) km', answer)
             domet = domet_match.group(1) if domet_match else "nepoznat"
             
-            # Izvuci snagu
-            snaga_match = re.search(r'snagu ([\d\.]+) kw', answer)
-            snaga = snaga_match.group(1) if snaga_match else "nepoznata"
+            # Izvuci snagu - POBOLJŠANO
+            snaga_match = re.search(r'snagu ([\d\.]+) kw', answer.lower())
+            if not snaga_match:
+                snaga_match = re.search(r'(\d+(?:\.\d+)?)\s*kw', answer.lower())
+            snaga = snaga_match.group(1) if snaga_match else "?"
             
             # Izvuci kategoriju vozačke
-            vozacka = "AM" if "am kategorija" in answer.lower() else "A1" if "a1 kategorija" in answer.lower() else "nepoznata"
+            vozacka = "AM" if "am kategorija" in answer.lower() else "A1" if "a1 kategorija" in answer.lower() else "?"
             
-            # Izvuci link
+            # Izvuci link - poboljšano za različite formate
             link_match = re.search(r"<a href='([^']+)'", answer)
-            link = link_match.group(1) if link_match else "#"
+            if not link_match:
+                link_match = re.search(r'https?://[^\s]+', answer)
+            link = link_match.group(0) if link_match else "#"
             
             models_text += f"\n\n{i}. **{model_name}**\n   - Snaga: {snaga} kW\n   - Domet: {domet} km\n   - Kategorija: {vozacka}\n   - Detaljnije: {link}"
         
-        response_text = f"Na osnovu tvojih kriterijuma, preporučujem sledeće modele:{models_text}\n\nAko želiš više informacija o nekom modelu, slobodno pitaj!"
+        response_text = f"Na osnovu tvojih kriterijuma, preporučujem sledeće modele:{models_text}\n\nAko želiš više informacija o nekom modelu, slobodno pitaj! Ako ti se neki od ovih modela ne sviđa, reci mi pa ću probati da nađem drugačije opcije."
         
-        return response_text
+        return response_text, recommended_ids
     
     def generate_response(self, 
                          message: str, 
@@ -465,7 +515,7 @@ class ContextAwareChatbot:
             # NOVO: Obrada preporuka
             if intent == Intent.PRODUCT_RECOMMENDATION:
                 criteria = self.extract_criteria_from_message(message)
-                response_text = self.generate_recommendation_response(message, criteria)
+                response_text, recommended_ids = self.generate_recommendation_response(message, criteria, conversation.messages)
                 
                 # Sačuvaj poruke u memoriju
                 self.add_to_conversation(memory_key, {
@@ -479,6 +529,7 @@ class ContextAwareChatbot:
                     'content': response_text,
                     'timestamp': datetime.now().isoformat(),
                     'intent': intent.value,
+                    'recommended_models': recommended_ids,
                     'knowledge_used': []
                 })
                 
