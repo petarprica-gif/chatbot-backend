@@ -351,18 +351,20 @@ class ContextAwareChatbot:
             logger.error(traceback.format_exc())
             return {}
     
-    def filter_models_by_criteria(self, criteria: Dict[str, any]) -> List[Dict]:
+    def filter_models_by_criteria(self, criteria: Dict[str, any], message: str = "") -> List[Dict]:
         """
         Filtrira modele iz baze znanja na osnovu zadatih kriterijuma.
         
         Args:
             criteria: Rečnik sa kriterijumima
+            message: Originalna poruka (za dodatne provere)
         
         Returns:
             Lista modela koji ispunjavaju kriterijume
         """
         logger.info(f"===== filter_models_by_criteria POZVAN =====")
         logger.info(f"Primljeni kriterijumi: {criteria}")
+        logger.info(f"Poruka: {message}")
         logger.info(f"Ukupno modela u bazi: {len(self.knowledge_base)}")
         
         filtered_models = []
@@ -379,32 +381,54 @@ class ContextAwareChatbot:
             # Provera kriterijuma iz odgovora
             answer = item.get('answer', '').lower()
             
-            # Provera kategorije vozačke dozvole - POPRAVLJENO
+            # POSEBNO ZA AM KATEGORIJU I GRADSKU VOŽNJU
+            if 'kategorija_vozacke' in criteria and criteria['kategorija_vozacke'] == 'AM':
+                # Ako se traži gradska vožnja, uključi sve skutere
+                if 'grad' in message.lower() or 'gradsku' in message.lower() or 'gradska' in message.lower():
+                    if item.get('category') == 'skuteri':
+                        logger.info(f"✅ Skuter prihvaćen za gradsku vožnju: {item.get('question')}")
+                        filtered_models.append(item)
+                        continue
+            
+            # Provera kategorije vozačke dozvole
             if 'kategorija_vozacke' in criteria and criteria['kategorija_vozacke']:
                 vozacka = criteria['kategorija_vozacke'].lower()
                 logger.info(f"Proveravam model za {vozacka}: {item.get('question')}, kategorija: {item.get('category')}")
                 
                 if vozacka == 'am':
                     # AM kategorija - svi skuteri su po zakonu AM
-                    # Proveri da li je u pitanju skuter (po kategoriji)
                     if item.get('category') != 'skuteri':
-                        # Ako nije skuter, preskoči
                         logger.info(f"❌ Nije skuter, preskačem")
                         continue
-                    # Ako jeste skuter, prihvati ga (čak i ako ne pominje eksplicitno AM)
                     logger.info(f"✅ Skuter prihvaćen za AM kategoriju")
                 elif vozacka == 'a1' and 'a1 kategorija' not in answer:
                     logger.info(f"❌ Nije A1 kategorija, preskačem")
                     continue
             
-            # Provera dometa
+            # Provera dometa - POBOLJŠANO
             domet_match = re.search(r'domet do (\d+) km', answer)
             if domet_match:
                 domet = int(domet_match.group(1))
-                if 'min_domet' in criteria and criteria['min_domet'] and domet < criteria['min_domet']:
-                    continue
-                if 'max_domet' in criteria and criteria['max_domet'] and domet > criteria['max_domet']:
-                    continue
+                logger.info(f"Model ima domet: {domet} km")
+                
+                # Ako je zadan min_domet, proveri sa fleksibilnošću
+                if 'min_domet' in criteria and criteria['min_domet']:
+                    # Dozvoli odstupanje od 20% (za "oko 250 km" prihvati 200-300 km)
+                    min_allowed = criteria['min_domet'] * 0.8
+                    if domet < min_allowed:
+                        logger.info(f"❌ Domet {domet} < {min_allowed:.0f} (20% ispod {criteria['min_domet']})")
+                        continue
+                    else:
+                        logger.info(f"✅ Domet {domet} >= {min_allowed:.0f}")
+                
+                # Ako je zadan max_domet, proveri sa fleksibilnošću
+                if 'max_domet' in criteria and criteria['max_domet']:
+                    max_allowed = criteria['max_domet'] * 1.2
+                    if domet > max_allowed:
+                        logger.info(f"❌ Domet {domet} > {max_allowed:.0f} (20% iznad {criteria['max_domet']})")
+                        continue
+                    else:
+                        logger.info(f"✅ Domet {domet} <= {max_allowed:.0f}")
             
             # Ako je prošao sve filtere, dodaj u listu
             filtered_models.append(item)
@@ -428,6 +452,7 @@ class ContextAwareChatbot:
         logger.info(f"===== generate_recommendation_response POZVAN =====")
         logger.info(f"Kriterijumi: {criteria}")
         logger.info(f"Dužina istorije: {len(conversation_history)}")
+        logger.info(f"Poruka: {message}")
         
         # Proveri da li je ovo nastavak prethodne preporuke
         previous_models = []
@@ -439,8 +464,8 @@ class ContextAwareChatbot:
         
         logger.info(f"Prethodno preporučeni modeli: {previous_models}")
         
-        # Filtriraj modele
-        matching_models = self.filter_models_by_criteria(criteria)
+        # Filtriraj modele (prosledi i originalnu poruku)
+        matching_models = self.filter_models_by_criteria(criteria, message)
         
         # Ako imamo prethodne modele, izbaci ih iz preporuke
         if previous_models and matching_models:
