@@ -408,6 +408,7 @@ function initChatWidget() {
         primaryColor: '#069806',
         title: 'Vaša ZAPmoto podrška',
         subtitle: 'Pitajte nas bilo šta o električnim skuterima',
+	position: 'bottom-right',
         apiUrl: 'https://chatbot-backend-hcvx.onrender.com/webhook'
     });
 }
