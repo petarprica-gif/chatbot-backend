@@ -379,17 +379,22 @@ class ContextAwareChatbot:
             # Provera kriterijuma iz odgovora
             answer = item.get('answer', '').lower()
             
-            # Provera kategorije vozačke dozvole
+            # Provera kategorije vozačke dozvole - POPRAVLJENO
             if 'kategorija_vozacke' in criteria and criteria['kategorija_vozacke']:
                 vozacka = criteria['kategorija_vozacke'].lower()
+                logger.info(f"Proveravam model za {vozacka}: {item.get('question')}, kategorija: {item.get('category')}")
+                
                 if vozacka == 'am':
-                    # AM kategorija - svi skuteri su po definiciji AM, ali proveri da nije motocikl
-                    if 'a1 kategorija' in answer:
+                    # AM kategorija - svi skuteri su po zakonu AM
+                    # Proveri da li je u pitanju skuter (po kategoriji)
+                    if item.get('category') != 'skuteri':
+                        # Ako nije skuter, preskoči
+                        logger.info(f"❌ Nije skuter, preskačem")
                         continue
-                    # Takođe proveri da li je u pitanju skuter (kategorija)
-                    if item.get('category') != 'skuteri' and 'skuter' not in answer:
-                        continue
+                    # Ako jeste skuter, prihvati ga (čak i ako ne pominje eksplicitno AM)
+                    logger.info(f"✅ Skuter prihvaćen za AM kategoriju")
                 elif vozacka == 'a1' and 'a1 kategorija' not in answer:
+                    logger.info(f"❌ Nije A1 kategorija, preskačem")
                     continue
             
             # Provera dometa
@@ -403,6 +408,7 @@ class ContextAwareChatbot:
             
             # Ako je prošao sve filtere, dodaj u listu
             filtered_models.append(item)
+            logger.info(f"✅ Model prihvaćen: {item.get('question')}")
         
         logger.info(f"Pronađeno {len(filtered_models)} modela koji odgovaraju kriterijumima")
         return filtered_models
@@ -441,11 +447,21 @@ class ContextAwareChatbot:
             matching_models = [m for m in matching_models if m.get('id') not in previous_models]
             logger.info(f"Nakon izbacivanja prethodnih, ostalo {len(matching_models)} modela")
         
+        # Posebna obrada za AM kategoriju - ako nema rezultata, ponudi sve skutere
+        if not matching_models and criteria.get('kategorija_vozacke') == 'AM':
+            logger.info("Nema modela za AM kriterijume, tražim sve skutere...")
+            all_scooters = [item for item in self.knowledge_base 
+                          if item.get('source') == 'proizvodi' 
+                          and item.get('category') == 'skuteri']
+            if all_scooters:
+                matching_models = all_scooters[:5]  # Uzmi prvih 5
+                logger.info(f"Pronađeno {len(matching_models)} skutera kao zamena")
+        
         if not matching_models:
             if previous_models:
-                return "Razumem. Nažalost, trenutno nemamo druge modele koji odgovaraju tvojim kriterijumima. Preporučujem ti da pogledaš našu kompletnu ponudu na sajtu: https://zapmoto.rs/proizvodi/ ili da mi kažeš koji su ti drugi kriterijumi važni (npr. niža cena, manji domet, prenosiva baterija...).", []
+                return "Razumem. Nažalost, trenutno nemamo druge modele koji odgovaraju tvojim kriterijumima. Preporučujem ti da pogledaš našu kompletnu ponudu na sajtu: https://zapmoto.rs/product-category/elektricni-skuteri-i-motori/ ili da mi kažeš koji su ti drugi kriterijumi važni (npr. niža cena, manji domet, prenosiva baterija...).", []
             else:
-                return "Nažalost, trenutno nemamo modele koji u potpunosti odgovaraju tvojim kriterijumima. Preporučujem ti da pogledaš našu ponudu na sajtu: https://zapmoto.rs/proizvodi/ ili da nas kontaktiraš za dodatnu pomoć.", []
+                return "Nažalost, trenutno nemamo modele koji u potpunosti odgovaraju tvojim kriterijumima. Preporučujem ti da pogledaš našu ponudu na sajtu: https://zapmoto.rs/product-category/elektricni-skuteri-i-motori/ ili da nas kontaktiraš za dodatnu pomoć.", []
         
         # Pripremi listu modela za prikaz
         models_text = ""
