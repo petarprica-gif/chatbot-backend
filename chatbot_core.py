@@ -23,7 +23,7 @@ class Intent(Enum):
     PAYMENT_ISSUE = "payment_issue"
     CONTACT_SUPPORT = "contact_support"
     FAREWELL = "farewell"
-    PRODUCT_RECOMMENDATION = "product_recommendation"  # NOVO
+    PRODUCT_RECOMMENDATION = "product_recommendation"
     UNKNOWN = "unknown"
 
 @dataclass
@@ -273,36 +273,109 @@ class ContextAwareChatbot:
             logger.error(f"Greška pri detekciji namere: {str(e)}")
             return Intent.UNKNOWN
     
-    # NOVA FUNKCIJA: Filtriranje modela po kriterijumima
+    def extract_criteria_from_message(self, message: str) -> Dict[str, any]:
+        """
+        Koristi OpenAI da iz poruke izdvoji kriterijume za preporuku.
+        
+        Args:
+            message: Korisnička poruka
+        
+        Returns:
+            Rečnik sa kriterijumima
+        """
+        logger.info(f"===== extract_criteria_from_message POZVAN =====")
+        logger.info(f"Poruka: {message}")
+        
+        criteria_prompt = f"""
+        Na osnovu korisničkog pitanja: "{message}"
+        Izdvoj kriterijume za preporuku električnog skutera/motocikla.
+        Vrati SAMO JSON u formatu:
+        {{
+            "kategorija": "skuteri" ili "motocikli" ili null,
+            "min_domet": broj u km ili null,
+            "max_domet": broj u km ili null,
+            "max_snaga": broj u kW ili null,
+            "kategorija_vozacke": "AM" ili "A1" ili null,
+            "prenosna_baterija": true ili false ili null
+        }}
+        Ako neki kriterijum nije pomenut, vrati null.
+        Vrati SAMO JSON, ništa drugo.
+        """
+        
+        try:
+            logger.info("Šaljem zahtev ka OpenAI...")
+            response = openai.ChatCompletion.create(
+                model="gpt-3.5-turbo",
+                messages=[
+                    {"role": "system", "content": criteria_prompt},
+                    {"role": "user", "content": message}
+                ],
+                max_tokens=200,
+                temperature=0.3
+            )
+            
+            criteria_text = response.choices[0].message.content.strip()
+            logger.info(f"Odgovor od OpenAI-ja: {criteria_text}")
+            
+            # Očisti JSON ako ima markdowna
+            if criteria_text.startswith('```json'):
+                criteria_text = criteria_text.replace('```json', '').replace('```', '')
+            elif criteria_text.startswith('```'):
+                criteria_text = criteria_text.replace('```', '')
+            
+            criteria_text = criteria_text.strip()
+            logger.info(f"Očišćen JSON string: {criteria_text}")
+            
+            # Pokušaj da parsiraš JSON
+            try:
+                criteria = json.loads(criteria_text)
+                logger.info(f"Parsirani kriterijumi: {criteria}")
+            except json.JSONDecodeError as e:
+                logger.error(f"❌ Neispravan JSON od OpenAI-ja: {criteria_text}")
+                logger.error(f"Greška pri parsiranju: {str(e)}")
+                # Vrati prazan rečnik kao fallback
+                criteria = {}
+            
+            # Osiguraj da svi očekivani ključevi postoje
+            expected_keys = ['kategorija', 'min_domet', 'max_domet', 'max_snaga', 'kategorija_vozacke', 'prenosna_baterija']
+            for key in expected_keys:
+                if key not in criteria:
+                    criteria[key] = None
+                    logger.info(f"Dodajem nedostajući ključ: {key} = None")
+            
+            logger.info(f"Konačni kriterijumi: {criteria}")
+            return criteria
+            
+        except Exception as e:
+            logger.error(f"❌ Greška u extract_criteria_from_message: {str(e)}")
+            logger.error(traceback.format_exc())
+            return {}
+    
     def filter_models_by_criteria(self, criteria: Dict[str, any]) -> List[Dict]:
         """
         Filtrira modele iz baze znanja na osnovu zadatih kriterijuma.
         
         Args:
-            criteria: Rečnik sa kriterijumima, npr:
-                    {
-                        'kategorija': 'motocikli',  # ili 'skuteri'
-                        'max_snaga': 11,
-                        'min_domet': 180,
-                        'max_domet': 230,
-                        'kategorija_vozacke': 'A1',
-                        'prenosna_baterija': True
-                    }
+            criteria: Rečnik sa kriterijumima
         
         Returns:
             Lista modela koji ispunjavaju kriterijume
         """
+        logger.info(f"===== filter_models_by_criteria POZVAN =====")
+        logger.info(f"Primljeni kriterijumi: {criteria}")
+        logger.info(f"Ukupno modela u bazi: {len(self.knowledge_base)}")
+        
         filtered_models = []
         
-        for item in self.knowledge_base:
+        for idx, item in enumerate(self.knowledge_base):
             # Proveri da li je unos proizvod (ima polje 'source' == 'proizvodi')
             if item.get('source') != 'proizvodi':
                 continue
-                
+            
             # Provera kategorije (skuteri/motocikli) ako je zadata
             if 'kategorija' in criteria and criteria['kategorija'] and item.get('category') != criteria['kategorija']:
                 continue
-                
+            
             # Provera kriterijuma iz odgovora
             answer = item.get('answer', '').lower()
             
@@ -328,87 +401,13 @@ class ContextAwareChatbot:
                 if 'max_domet' in criteria and criteria['max_domet'] and domet > criteria['max_domet']:
                     continue
             
-            # Provera snage - POBOLJŠANO
-            snaga_match = re.search(r'snagu ([\d\.]+) kw', answer)
-            if not snaga_match:
-                snaga_match = re.search(r'(\d+(?:\.\d+)?)\s*kw', answer)
-            if not snaga_match and 'max_snaga' in criteria and criteria['max_snaga']:
-                # Ako nema podatka o snazi, ali je kriterijum zadat, ipak dodaj model
-                # jer možda drugi kriterijumi ispunjavaju
-                pass
-            elif snaga_match and 'max_snaga' in criteria and criteria['max_snaga']:
-                snaga = float(snaga_match.group(1))
-                if snaga > criteria['max_snaga']:
-                    continue
-            
-            # Provera prenosivosti baterije
-            if 'prenosna_baterija' in criteria and criteria['prenosna_baterija'] is not None:
-                baterija_prenosna = 'prenosna' in answer or 'prenosna baterija' in answer
-                if criteria['prenosna_baterija'] and not baterija_prenosna:
-                    continue
-                if not criteria['prenosna_baterija'] and baterija_prenosna:
-                    continue
-            
             # Ako je prošao sve filtere, dodaj u listu
             filtered_models.append(item)
         
+        logger.info(f"Pronađeno {len(filtered_models)} modela koji odgovaraju kriterijumima")
         return filtered_models
     
-    # NOVA FUNKCIJA: Izdvajanje kriterijuma iz poruke
-    def extract_criteria_from_message(self, message: str) -> Dict[str, any]:
-        """
-        Koristi OpenAI da iz poruke izdvoji kriterijume za preporuku.
-        
-        Args:
-            message: Korisnička poruka
-        
-        Returns:
-            Rečnik sa kriterijumima
-        """
-        criteria_prompt = f"""
-        Na osnovu korisničkog pitanja: "{message}"
-        Izdvoj kriterijume za preporuku električnog skutera/motocikla.
-        Vrati SAMO JSON u formatu:
-        {{
-            "kategorija": "skuteri" ili "motocikli" ili null,
-            "min_domet": broj u km ili null,
-            "max_domet": broj u km ili null,
-            "max_snaga": broj u kW ili null,
-            "kategorija_vozacke": "AM" ili "A1" ili null,
-            "prenosna_baterija": true ili false ili null
-        }}
-        Ako neki kriterijum nije pomenut, vrati null.
-        Vrati SAMO JSON, ništa drugo.
-        """
-        
-        try:
-            response = openai.ChatCompletion.create(
-                model="gpt-3.5-turbo",
-                messages=[
-                    {"role": "system", "content": criteria_prompt},
-                    {"role": "user", "content": message}
-                ],
-                max_tokens=200,
-                temperature=0.3
-            )
-            
-            criteria_text = response.choices[0].message.content.strip()
-            # Očisti JSON ako ima markdowna
-            if criteria_text.startswith('```json'):
-                criteria_text = criteria_text.replace('```json', '').replace('```', '')
-            if criteria_text.startswith('```'):
-                criteria_text = criteria_text.replace('```', '')
-            
-            criteria = json.loads(criteria_text)
-            logger.info(f"Izdvojeni kriterijumi: {criteria}")
-            return criteria
-            
-        except Exception as e:
-            logger.error(f"Greška pri izdvajanju kriterijuma: {str(e)}")
-            return {}
-    
-    # NOVA FUNKCIJA: Generisanje odgovora sa preporukama
-    def generate_recommendation_response(self, message: str, criteria: Dict[str, any], conversation_history: List[Dict]) -> str:
+    def generate_recommendation_response(self, message: str, criteria: Dict[str, any], conversation_history: List[Dict]) -> tuple:
         """
         Generiše odgovor sa preporukama na osnovu kriterijuma.
         
@@ -418,8 +417,12 @@ class ContextAwareChatbot:
             conversation_history: Istorija razgovora za kontekst
         
         Returns:
-            Tekst odgovora sa preporukama
+            Tuple (tekst odgovora, lista preporučenih ID-jeva)
         """
+        logger.info(f"===== generate_recommendation_response POZVAN =====")
+        logger.info(f"Kriterijumi: {criteria}")
+        logger.info(f"Dužina istorije: {len(conversation_history)}")
+        
         # Proveri da li je ovo nastavak prethodne preporuke
         previous_models = []
         if conversation_history:
@@ -428,25 +431,30 @@ class ContextAwareChatbot:
                     previous_models = msg.get('recommended_models', [])
                     break
         
+        logger.info(f"Prethodno preporučeni modeli: {previous_models}")
+        
         # Filtriraj modele
         matching_models = self.filter_models_by_criteria(criteria)
         
         # Ako imamo prethodne modele, izbaci ih iz preporuke
         if previous_models and matching_models:
             matching_models = [m for m in matching_models if m.get('id') not in previous_models]
+            logger.info(f"Nakon izbacivanja prethodnih, ostalo {len(matching_models)} modela")
         
         if not matching_models:
             if previous_models:
-                return "Razumem. Nažalost, trenutno nemamo druge modele koji odgovaraju tvojim kriterijumima. Preporučujem ti da pogledaš našu kompletnu ponudu na sajtu: https://zapmoto.rs/proizvodi/ ili da mi kažeš koji su ti drugi kriterijumi važni (npr. niža cena, manji domet, prenosiva baterija...)."
+                return "Razumem. Nažalost, trenutno nemamo druge modele koji odgovaraju tvojim kriterijumima. Preporučujem ti da pogledaš našu kompletnu ponudu na sajtu: https://zapmoto.rs/proizvodi/ ili da mi kažeš koji su ti drugi kriterijumi važni (npr. niža cena, manji domet, prenosiva baterija...).", []
             else:
-                return "Nažalost, trenutno nemamo modele koji u potpunosti odgovaraju tvojim kriterijumima. Preporučujem ti da pogledaš našu ponudu na sajtu: https://zapmoto.rs/proizvodi/ ili da nas kontaktiraš za dodatnu pomoć."
+                return "Nažalost, trenutno nemamo modele koji u potpunosti odgovaraju tvojim kriterijumima. Preporučujem ti da pogledaš našu ponudu na sajtu: https://zapmoto.rs/proizvodi/ ili da nas kontaktiraš za dodatnu pomoć.", []
         
         # Pripremi listu modela za prikaz
         models_text = ""
         recommended_ids = []
         for i, model in enumerate(matching_models[:5], 1):  # Maksimalno 5 modela
             # Sačuvaj ID za eventualno naknadno filtriranje
-            recommended_ids.append(model.get('id'))
+            model_id = model.get('id')
+            if model_id:
+                recommended_ids.append(model_id)
             
             # Izvuci naziv modela iz pitanja
             question = model.get('question', '')
@@ -455,11 +463,11 @@ class ContextAwareChatbot:
             # Izvuci ključne karakteristike iz odgovora
             answer = model.get('answer', '')
             
-            # Izvuci domet - POBOLJŠANO
+            # Izvuci domet
             domet_match = re.search(r'domet do (\d+) km', answer)
             domet = domet_match.group(1) if domet_match else "nepoznat"
             
-            # Izvuci snagu - POBOLJŠANO
+            # Izvuci snagu
             snaga_match = re.search(r'snagu ([\d\.]+) kw', answer.lower())
             if not snaga_match:
                 snaga_match = re.search(r'(\d+(?:\.\d+)?)\s*kw', answer.lower())
@@ -468,16 +476,15 @@ class ContextAwareChatbot:
             # Izvuci kategoriju vozačke
             vozacka = "AM" if "am kategorija" in answer.lower() else "A1" if "a1 kategorija" in answer.lower() else "?"
             
-            # Izvuci link - poboljšano za različite formate
-            link_match = re.search(r"<a href='([^']+)'", answer)
-            if not link_match:
-                link_match = re.search(r'https?://[^\s]+', answer)
+            # Izvuci link
+            link_match = re.search(r"https?://[^\s]+", answer)
             link = link_match.group(0) if link_match else "#"
             
             models_text += f"\n\n{i}. **{model_name}**\n   - Snaga: {snaga} kW\n   - Domet: {domet} km\n   - Kategorija: {vozacka}\n   - Detaljnije: {link}"
         
         response_text = f"Na osnovu tvojih kriterijuma, preporučujem sledeće modele:{models_text}\n\nAko želiš više informacija o nekom modelu, slobodno pitaj! Ako ti se neki od ovih modela ne sviđa, reci mi pa ću probati da nađem drugačije opcije."
         
+        logger.info(f"Generisano {len(recommended_ids)} preporuka")
         return response_text, recommended_ids
     
     def generate_response(self, 
@@ -499,6 +506,12 @@ class ContextAwareChatbot:
         """
         
         try:
+            logger.info(f"===== GENERATE_RESPONSE POZVAN =====")
+            logger.info(f"Poruka: {message}")
+            logger.info(f"User ID: {user_id}")
+            logger.info(f"Conversation ID: {conversation_id}")
+            logger.info(f"Channel: {channel}")
+            
             # Dohvati ili kreiraj memoriju konverzacije
             memory_key = f"{user_id}:{conversation_id}" if conversation_id else user_id
             conversation = self.get_or_create_conversation(memory_key, user_id, channel)
@@ -509,11 +522,13 @@ class ContextAwareChatbot:
             
             # Proveri da li je potrebna eskalacija
             if self.should_escalate(message, intent, conversation):
+                logger.info("Potrebna eskalacija ka agentu")
                 conversation.escalation_needed = True
                 return self.prepare_escalation(message, conversation)
             
-            # NOVO: Obrada preporuka
+            # Obrada preporuka
             if intent == Intent.PRODUCT_RECOMMENDATION:
+                logger.info("Obrada preporuka...")
                 criteria = self.extract_criteria_from_message(message)
                 response_text, recommended_ids = self.generate_recommendation_response(message, criteria, conversation.messages)
                 
@@ -533,6 +548,7 @@ class ContextAwareChatbot:
                     'knowledge_used': []
                 })
                 
+                logger.info("Preporuke uspešno generisane")
                 return {
                     'response': response_text,
                     'intent': intent.value,
@@ -543,6 +559,7 @@ class ContextAwareChatbot:
                 }
             
             # Za ostale namere, koristi standardnu pretragu
+            logger.info("Standardna obrada pitanja...")
             # Pronađi relevantne informacije iz baze znanja
             relevant_knowledge = self.retrieve_relevant_knowledge(message)
             
@@ -584,10 +601,11 @@ class ContextAwareChatbot:
                 'channel_specific': self.get_channel_specific_response(channel, response_text)
             }
             
+            logger.info("Odgovor uspešno generisan")
             return response
             
         except Exception as e:
-            logger.error(f"Greška u generate_response: {str(e)}")
+            logger.error(f"❌ Greška u generate_response: {str(e)}")
             logger.error(traceback.format_exc())
             return {
                 'response': "Došlo je do tehničke greške. Molim vas pokušajte ponovo ili kontaktirajte podršku.",
