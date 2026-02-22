@@ -395,12 +395,35 @@ class SmartChatWidget {
     }
 }
 
-// Automatska inicijalizacija kada se stranica učita
-window.addEventListener('load', () => {
-    const chat = new SmartChatWidget({
+// Robusnija inicijalizacija - radi bez obzira na to kako se stranica učitava
+function initChatWidget() {
+    // Proveri da li već postoji da ne bismo duplirali
+    if (window.smartChatWidgetInstance) {
+        console.log("Chatbot već inicijalizovan");
+        return;
+    }
+    
+    console.log("Inicijalizujem chatbot...");
+    window.smartChatWidgetInstance = new SmartChatWidget({
         primaryColor: '#069806',
         title: 'Vaša ZAPmoto podrška',
         subtitle: 'Pitajte nas bilo šta o električnim skuterima',
         apiUrl: 'https://chatbot-backend-hcvx.onrender.com/webhook'
     });
+}
+
+// Pokušaj odmah ako je dokument već učitan
+if (document.readyState === 'complete' || document.readyState === 'interactive') {
+    console.log("Dokument već spreman, pokrećem odmah");
+    setTimeout(initChatWidget, 100); // Mali timeout da se osigura redosled
+} else {
+    // Ako nije, sačekaj DOMContentLoaded
+    console.log("Čekam DOMContentLoaded...");
+    document.addEventListener('DOMContentLoaded', initChatWidget);
+}
+
+// Rezervna opcija - uvek sačekaj load
+window.addEventListener('load', function() {
+    console.log("Load event - pokrećem ako već nije pokrenuto");
+    initChatWidget();
 });
