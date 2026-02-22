@@ -370,30 +370,42 @@ class ContextAwareChatbot:
         filtered_models = []
         
         for idx, item in enumerate(self.knowledge_base):
+            model_name = item.get('question', 'nepoznato')
+            logger.info(f"--- Proveravam model: {model_name} ---")
+            
             # Proveri da li je unos proizvod (ima polje 'source' == 'proizvodi')
             if item.get('source') != 'proizvodi':
+                logger.info(f"❌ Nije proizvod (source={item.get('source')}), preskačem")
                 continue
             
             # Provera kategorije (skuteri/motocikli) ako je zadata
-            if 'kategorija' in criteria and criteria['kategorija'] and item.get('category') != criteria['kategorija']:
-                continue
+            if 'kategorija' in criteria and criteria['kategorija']:
+                logger.info(f"Proveravam kategoriju: očekuje se {criteria['kategorija']}, imamo {item.get('category')}")
+                if item.get('category') != criteria['kategorija']:
+                    logger.info(f"❌ Kategorija se ne poklapa, preskačem")
+                    continue
+                else:
+                    logger.info(f"✅ Kategorija se poklapa")
             
             # Provera kriterijuma iz odgovora
             answer = item.get('answer', '').lower()
             
             # POSEBNO ZA AM KATEGORIJU I GRADSKU VOŽNJU
             if 'kategorija_vozacke' in criteria and criteria['kategorija_vozacke'] == 'AM':
-                # Ako se traži gradska vožnja, uključi sve skutere
                 if 'grad' in message.lower() or 'gradsku' in message.lower() or 'gradska' in message.lower():
+                    logger.info(f"Proveravam za gradsku vožnju sa AM")
                     if item.get('category') == 'skuteri':
-                        logger.info(f"✅ Skuter prihvaćen za gradsku vožnju: {item.get('question')}")
+                        logger.info(f"✅ Skuter prihvaćen za gradsku vožnju (bez dodatnih provera)")
                         filtered_models.append(item)
+                        continue
+                    else:
+                        logger.info(f"❌ Nije skuter, preskačem")
                         continue
             
             # Provera kategorije vozačke dozvole
             if 'kategorija_vozacke' in criteria and criteria['kategorija_vozacke']:
                 vozacka = criteria['kategorija_vozacke'].lower()
-                logger.info(f"Proveravam model za {vozacka}: {item.get('question')}, kategorija: {item.get('category')}")
+                logger.info(f"Proveravam kategoriju vozačke: {vozacka}")
                 
                 if vozacka == 'am':
                     # AM kategorija - svi skuteri su po zakonu AM
@@ -401,40 +413,59 @@ class ContextAwareChatbot:
                         logger.info(f"❌ Nije skuter, preskačem")
                         continue
                     logger.info(f"✅ Skuter prihvaćen za AM kategoriju")
-                elif vozacka == 'a1' and 'a1 kategorija' not in answer:
-                    logger.info(f"❌ Nije A1 kategorija, preskačem")
-                    continue
+                elif vozacka == 'a1':
+                    if 'a1 kategorija' not in answer:
+                        logger.info(f"❌ Nema 'a1 kategorija' u opisu, preskačem")
+                        # Dodatna provera - možda je ipak A1
+                        if 'a1' in answer:
+                            logger.info(f"⚠️ Ali sadrži 'a1' u tekstu, možda bi trebalo prihvatiti?")
+                        continue
+                    else:
+                        logger.info(f"✅ Sadrži 'a1 kategorija' u opisu")
             
-            # Provera dometa - POBOLJŠANO
+            # Provera dometa - DETALJNO LOGOVANJE
             domet_match = re.search(r'domet do (\d+) km', answer)
             if domet_match:
                 domet = int(domet_match.group(1))
-                logger.info(f"Model ima domet: {domet} km")
+                logger.info(f"Pronađen domet: {domet} km")
+                
+                domet_passed = True
                 
                 # Ako je zadan min_domet, proveri sa fleksibilnošću
                 if 'min_domet' in criteria and criteria['min_domet']:
-                    # Dozvoli odstupanje od 20% (za "oko 250 km" prihvati 200-300 km)
                     min_allowed = criteria['min_domet'] * 0.8
+                    logger.info(f"Proveravam min_domet: {domet} >= {min_allowed:.0f} (20% ispod {criteria['min_domet']})")
                     if domet < min_allowed:
-                        logger.info(f"❌ Domet {domet} < {min_allowed:.0f} (20% ispod {criteria['min_domet']})")
-                        continue
+                        logger.info(f"❌ Domet {domet} < {min_allowed:.0f}, preskačem")
+                        domet_passed = False
                     else:
                         logger.info(f"✅ Domet {domet} >= {min_allowed:.0f}")
                 
                 # Ako je zadan max_domet, proveri sa fleksibilnošću
-                if 'max_domet' in criteria and criteria['max_domet']:
+                if domet_passed and 'max_domet' in criteria and criteria['max_domet']:
                     max_allowed = criteria['max_domet'] * 1.2
+                    logger.info(f"Proveravam max_domet: {domet} <= {max_allowed:.0f} (20% iznad {criteria['max_domet']})")
                     if domet > max_allowed:
-                        logger.info(f"❌ Domet {domet} > {max_allowed:.0f} (20% iznad {criteria['max_domet']})")
-                        continue
+                        logger.info(f"❌ Domet {domet} > {max_allowed:.0f}, preskačem")
+                        domet_passed = False
                     else:
                         logger.info(f"✅ Domet {domet} <= {max_allowed:.0f}")
+                
+                if not domet_passed:
+                    continue
+            else:
+                logger.info(f"⚠️ Nije pronađen domet u opisu")
+                # Ako nema podatka o dometu, a kriterijum je zadat, možda ipak treba uključiti?
+                if 'min_domet' in criteria or 'max_domet' in criteria:
+                    logger.info(f"❌ Kriterijum dometa postoji ali nema podatka, preskačem")
+                    continue
             
             # Ako je prošao sve filtere, dodaj u listu
             filtered_models.append(item)
-            logger.info(f"✅ Model prihvaćen: {item.get('question')}")
+            logger.info(f"✅✅✅ MODEL PRIHVAĆEN: {model_name}")
         
-        logger.info(f"Pronađeno {len(filtered_models)} modela koji odgovaraju kriterijumima")
+        logger.info(f"===== FILTER ZAVRŠEN: PRONAĐENO {len(filtered_models)} MODEL =====")
+        logger.info(f"Prihvaćeni modeli: {[m.get('question', 'nepoznato') for m in filtered_models]}")
         return filtered_models
     
     def generate_recommendation_response(self, message: str, criteria: Dict[str, any], conversation_history: List[Dict]) -> tuple:
@@ -460,6 +491,7 @@ class ContextAwareChatbot:
             for msg in reversed(conversation_history):
                 if msg.get('intent') == 'product_recommendation' and 'recommended_models' in msg:
                     previous_models = msg.get('recommended_models', [])
+                    logger.info(f"Pronađene prethodne preporuke: {previous_models}")
                     break
         
         logger.info(f"Prethodno preporučeni modeli: {previous_models}")
@@ -469,8 +501,11 @@ class ContextAwareChatbot:
         
         # Ako imamo prethodne modele, izbaci ih iz preporuke
         if previous_models and matching_models:
+            before_count = len(matching_models)
             matching_models = [m for m in matching_models if m.get('id') not in previous_models]
-            logger.info(f"Nakon izbacivanja prethodnih, ostalo {len(matching_models)} modela")
+            logger.info(f"Nakon izbacivanja prethodnih: {before_count} -> {len(matching_models)} modela")
+            if len(matching_models) == 0:
+                logger.info("⚠️ Nema novih modela nakon izbacivanja prethodnih")
         
         # Posebna obrada za AM kategoriju - ako nema rezultata, ponudi sve skutere
         if not matching_models and criteria.get('kategorija_vozacke') == 'AM':
@@ -478,11 +513,17 @@ class ContextAwareChatbot:
             all_scooters = [item for item in self.knowledge_base 
                           if item.get('source') == 'proizvodi' 
                           and item.get('category') == 'skuteri']
+            logger.info(f"Pronađeno ukupno {len(all_scooters)} skutera u bazi")
             if all_scooters:
-                matching_models = all_scooters[:5]  # Uzmi prvih 5
-                logger.info(f"Pronađeno {len(matching_models)} skutera kao zamena")
+                # Izbaci prethodno preporučene
+                if previous_models:
+                    all_scooters = [s for s in all_scooters if s.get('id') not in previous_models]
+                    logger.info(f"Nakon izbacivanja prethodnih: {len(all_scooters)} skutera")
+                matching_models = all_scooters[:5]
+                logger.info(f"Uzimam prvih {len(matching_models)} skutera kao zamenu")
         
         if not matching_models:
+            logger.info("❌ Nema modela koji zadovoljavaju kriterijume")
             if previous_models:
                 return "Razumem. Nažalost, trenutno nemamo druge modele koji odgovaraju tvojim kriterijumima. Preporučujem ti da pogledaš našu kompletnu ponudu na sajtu: https://zapmoto.rs/product-category/elektricni-skuteri-i-motori/ ili da mi kažeš koji su ti drugi kriterijumi važni (npr. niža cena, manji domet, prenosiva baterija...).", []
             else:
@@ -496,6 +537,7 @@ class ContextAwareChatbot:
             model_id = model.get('id')
             if model_id:
                 recommended_ids.append(model_id)
+                logger.info(f"Dodajem model ID {model_id} u preporuke")
             
             # Izvuci naziv modela iz pitanja
             question = model.get('question', '')
@@ -525,7 +567,7 @@ class ContextAwareChatbot:
         
         response_text = f"Na osnovu tvojih kriterijuma, preporučujem sledeće modele:{models_text}\n\nAko želiš više informacija o nekom modelu, slobodno pitaj! Ako ti se neki od ovih modela ne sviđa, reci mi pa ću probati da nađem drugačije opcije."
         
-        logger.info(f"Generisano {len(recommended_ids)} preporuka")
+        logger.info(f"Generisano {len(recommended_ids)} preporuka: {recommended_ids}")
         return response_text, recommended_ids
     
     def generate_response(self, 
