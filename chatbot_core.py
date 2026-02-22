@@ -529,6 +529,18 @@ class ContextAwareChatbot:
             else:
                 return "Nažalost, trenutno nemamo modele koji u potpunosti odgovaraju tvojim kriterijumima. Preporučujem ti da pogledaš našu ponudu na sajtu: https://zapmoto.rs/product-category/elektricni-skuteri-i-motori/ ili da nas kontaktiraš za dodatnu pomoć.", []
         
+        # ===== NOVO: Sortiranje modela po dometu (od najvećeg ka najmanjem) =====
+        def get_domet(model):
+            answer = model.get('answer', '')
+            domet_match = re.search(r'domet do (\d+) km', answer)
+            if domet_match:
+                return int(domet_match.group(1))
+            return 0
+        
+        # Sortiraj opadajuće (veći domet prvi)
+        matching_models.sort(key=get_domet, reverse=True)
+        logger.info(f"Modeli sortirani po dometu: {[get_domet(m) for m in matching_models[:5]]}")
+        
         # Pripremi listu modela za prikaz
         models_text = ""
         recommended_ids = []
@@ -537,7 +549,7 @@ class ContextAwareChatbot:
             model_id = model.get('id')
             if model_id:
                 recommended_ids.append(model_id)
-                logger.info(f"Dodajem model ID {model_id} u preporuke")
+                logger.info(f"Dodajem model ID {model_id} u preporuke (domet: {get_domet(model)} km)")
             
             # Izvuci naziv modela iz pitanja
             question = model.get('question', '')
