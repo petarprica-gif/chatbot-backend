@@ -3,7 +3,7 @@
     "id": 1,
     "question": "Koje su karakteristike E2Go skutera sa 48V sistemom?",
     "answer": "E2Go skuter sa 48V sistemom ima snagu 2 kW, maksimalnu brzinu 45 km/h, obrtni moment 65 Nm i domet do 100 km. Baterija je prenosna, kapaciteta 52 Ah, CATL Li-Ion. Za vožnju je potrebna AM kategorija. Garancija na vozilo je 2 godine, na bateriju 3 godine ili 30.000 km. Proizvod je homologovan za Srbiju i dostupan je na zahtev. Cenu i detaljnije informacije pogledajte <a href='https://zapmoto.rs/product/elektricni-skuter-e2go/' target='_blank' style='color: #069806; text-decoration: underline;'>ovde</a>.",
-    "keywords": "E2Go, skuter, 48V, 2 kW, 45 km/h, 100 km, CATL, AM, garancija",
+    "keywords": "E2Go, skuter, 48V, 2 kW, 45 km/h, 100 km, CATL, AM, garancija, gradska vožnja, grad, urban, po gradu",
     "category": "skuteri",
     "source": "proizvodi"
   },
@@ -11,7 +11,7 @@
     "id": 2,
     "question": "Koje su karakteristike E2Go skutera sa 72V sistemom?",
     "answer": "E2Go skuter sa 72V sistemom ima snagu 2.6 kW, maksimalnu brzinu 45 km/h, obrtni moment 65 Nm i domet do 130 km. Baterija je prenosna, kapaciteta 52 Ah, CATL Li-Ion. Za vožnju je potrebna AM kategorija. Garancija na vozilo je 2 godine, na bateriju 3 godine ili 30.000 km. Proizvod je homologovan za Srbiju i dostupan je na zahtev. Cenu i detaljnije informacije pogledajte <a href='https://zapmoto.rs/product/elektricni-skuter-e2go/' target='_blank' style='color: #069806; text-decoration: underline;'>ovde</a>.",
-    "keywords": "E2Go, skuter, 72V, 2.6 kW, 45 km/h, 130 km, CATL, AM, garancija",
+    "keywords": "E2Go, skuter, 72V, 2.6 kW, 45 km/h, 130 km, CATL, AM, garancija, gradska vožnja, grad, urban, po gradu",
     "category": "skuteri",
     "source": "proizvodi"
   },
@@ -19,7 +19,7 @@
     "id": 3,
     "question": "Koje su karakteristike Pusa skutera sa 48V sistemom?",
     "answer": "Pusa skuter sa 48V sistemom ima snagu 2.4 kW, maksimalnu brzinu 45 km/h, obrtni moment 90 Nm i domet do 130 km. Baterija je prenosna, kapaciteta 66 Ah, CATL Li-Ion. Za vožnju je potrebna AM kategorija. Garancija na vozilo je 2 godine, na bateriju 3 godine ili 30.000 km. Proizvod je homologovan za Srbiju i dostupan je na lageru. Cenu i detaljnije informacije pogledajte <a href='https://zapmoto.rs/product/elektricni-skuter-pusa/' target='_blank' style='color: #069806; text-decoration: underline;'>ovde</a>.",
-    "keywords": "Pusa, skuter, 48V, 2.4 kW, 45 km/h, 130 km, CATL, AM, garancija, lager",
+    "keywords": "Pusa, skuter, 48V, 2.4 kW, 45 km/h, 130 km, CATL, AM, garancija, lager, gradska vožnja, grad, urban, po gradu",
     "category": "skuteri",
     "source": "proizvodi"
   },
@@ -27,7 +27,7 @@
     "id": 4,
     "question": "Koje su karakteristike Pusa skutera sa 72V sistemom?",
     "answer": "Pusa skuter sa 72V sistemom ima snagu 3 kW, maksimalnu brzinu 45 km/h, obrtni moment 90 Nm i domet do 170 km. Baterija je prenosna, kapaciteta 66 Ah, CATL Li-Ion. Za vožnju je potrebna AM kategorija. Garancija na vozilo je 2 godine, na bateriju 3 godine ili 30.000 km. Proizvod je homologovan za Srbiju i dostupan je na lageru. Cenu i detaljnije informacije pogledajte <a href='https://zapmoto.rs/product/elektricni-skuter-pusa/' target='_blank' style='color: #069806; text-decoration: underline;'>ovde</a>.",
-    "keywords": "Pusa, skuter, 72V, 3 kW, 45 km/h, 170 km, CATL, AM, garancija, lager",
+    "keywords": "Pusa, skuter, 72V, 3 kW, 45 km/h, 170 km, CATL, AM, garancija, lager, gradska vožnja, grad, urban, po gradu",
     "category": "skuteri",
     "source": "proizvodi"
   },
@@ -35,7 +35,7 @@
     "id": 5,
     "question": "Koje su karakteristike Lipo skutera sa 48V sistemom?",
     "answer": "Lipo skuter sa 48V sistemom ima snagu 2.4 kW, maksimalnu brzinu 45 km/h, obrtni moment 90 Nm i domet do 130 km. Baterija je prenosna, kapaciteta 66 Ah, CATL Li-Ion. Za vožnju je potrebna AM kategorija. Garancija na vozilo je 2 godine, na bateriju 3 godine ili 30.000 km. Proizvod je homologovan za Srbiju i dostupan je na lageru. Cenu i detaljnije informacije pogledajte <a href='https://zapmoto.rs/product/elektricni-skuter-lipo/' target='_blank' style='color: #069806; text-decoration: underline;'>ovde</a>.",
-    "keywords": "Lipo, skuter, 48V, 2.4 kW, 45 km/h, 130 km, CATL, AM, garancija, lager",
+    "keywords": "Lipo, skuter, 48V, 2.4 kW, 45 km/h, 130 km, CATL, AM, garancija, lager, gradska vožnja, grad, urban, po gradu",
     "category": "skuteri",
     "source": "proizvodi"
   },
@@ -43,7 +43,7 @@
     "id": 6,
     "question": "Koje su karakteristike Lipo skutera sa 72V sistemom?",
     "answer": "Lipo skuter sa 72V sistemom ima snagu 3 kW, maksimalnu brzinu 45 km/h, obrtni moment 90 Nm i domet do 170 km. Baterija je prenosna, kapaciteta 66 Ah, CATL Li-Ion. Za vožnju je potrebna AM kategorija. Garancija na vozilo je 2 godine, na bateriju 3 godine ili 30.000 km. Proizvod je homologovan za Srbiju i dostupan je na lageru. Cenu i detaljnije informacije pogledajte <a href='https://zapmoto.rs/product/elektricni-skuter-lipo/' target='_blank' style='color: #069806; text-decoration: underline;'>ovde</a>.",
-    "keywords": "Lipo, skuter, 72V, 3 kW, 45 km/h, 170 km, CATL, AM, garancija, lager",
+    "keywords": "Lipo, skuter, 72V, 3 kW, 45 km/h, 170 km, CATL, AM, garancija, lager, gradska vožnja, grad, urban, po gradu",
     "category": "skuteri",
     "source": "proizvodi"
   },
@@ -51,7 +51,7 @@
     "id": 7,
     "question": "Koje su karakteristike Deer skutera sa 48V sistemom?",
     "answer": "Deer skuter sa 48V sistemom ima snagu 2.4 kW, maksimalnu brzinu 45 km/h, obrtni moment 72.4 Nm i domet do 130 km. Baterija je prenosna, kapaciteta 66 Ah, CATL Li-Ion. Za vožnju je potrebna AM kategorija. Garancija na vozilo je 2 godine, na bateriju 3 godine ili 30.000 km. Proizvod je homologovan za Srbiju i dostupan je na lageru. Cenu i detaljnije informacije pogledajte <a href='https://zapmoto.rs/product/elektricni-skuter-deer/' target='_blank' style='color: #069806; text-decoration: underline;'>ovde</a>.",
-    "keywords": "Deer, skuter, 48V, 2.4 kW, 45 km/h, 130 km, CATL, AM, garancija, lager",
+    "keywords": "Deer, skuter, 48V, 2.4 kW, 45 km/h, 130 km, CATL, AM, garancija, lager, gradska vožnja, grad, urban, po gradu",
     "category": "skuteri",
     "source": "proizvodi"
   },
@@ -59,7 +59,7 @@
     "id": 8,
     "question": "Koje su karakteristike Deer skutera sa 72V sistemom?",
     "answer": "Deer skuter sa 72V sistemom ima snagu 3 kW, maksimalnu brzinu 45 km/h, obrtni moment 72.4 Nm i domet do 170 km. Baterija je prenosna, kapaciteta 66 Ah, CATL Li-Ion. Za vožnju je potrebna AM kategorija. Garancija na vozilo je 2 godine, na bateriju 3 godine ili 30.000 km. Proizvod je homologovan za Srbiju i dostupan je na lageru. Cenu i detaljnije informacije pogledajte <a href='https://zapmoto.rs/product/elektricni-skuter-deer/' target='_blank' style='color: #069806; text-decoration: underline;'>ovde</a>.",
-    "keywords": "Deer, skuter, 72V, 3 kW, 45 km/h, 170 km, CATL, AM, garancija, lager",
+    "keywords": "Deer, skuter, 72V, 3 kW, 45 km/h, 170 km, CATL, AM, garancija, lager, gradska vožnja, grad, urban, po gradu",
     "category": "skuteri",
     "source": "proizvodi"
   },
@@ -115,7 +115,7 @@
     "id": 107,
     "question": "Koje su karakteristike Puma motocikla S varijante?",
     "answer": "Puma motocikl S varijante ima snagu 9.9 kW, maksimalnu brzinu 120 km/h, obrtni moment 180 Nm i domet do 200 km. Baterija nije prenosna, kapaciteta 100 Ah, CATL Li-Ion. Za vožnju je potrebna A1 kategorija. Garancija na vozilo je 2 godine, na bateriju 3 godine ili 30.000 km. Proizvod je homologovan za Srbiju i dostupan je na zahtev. Cenu i detaljnije informacije pogledajte <a href='https://zapmoto.rs/product/elektricni-motocikl-puma/' target='_blank' style='color: #069806; text-decoration: underline;'>ovde</a>.",
-    "keywords": "Puma, motocikl, S, 9.9 kW, 120 km/h, 200 km, CATL, A1, garancija",
+    "keywords": "Puma, motocikl, S, 9.9 kW, 120 km/h, 200 km, CATL, A1, garancija, oko 200 km, domet 200 km",
     "category": "motocikli",
     "source": "proizvodi"
   },
@@ -123,7 +123,7 @@
     "id": 108,
     "question": "Koje su karakteristike Puma motocikla X varijante?",
     "answer": "Puma motocikl X varijante ima snagu 9.9 kW, maksimalnu brzinu 120 km/h, obrtni moment 180 Nm i domet do 250 km. Baterija nije prenosna, kapaciteta 117 Ah, CATL Li-Ion. Za vožnju je potrebna A1 kategorija. Garancija na vozilo je 2 godine, na bateriju 3 godine ili 30.000 km. Proizvod je homologovan za Srbiju i dostupan je na zahtev. Cenu i detaljnije informacije pogledajte <a href='https://zapmoto.rs/product/elektricni-motocikl-puma/' target='_blank' style='color: #069806; text-decoration: underline;'>ovde</a>.",
-    "keywords": "Puma, motocikl, X, 9.9 kW, 120 km/h, 250 km, CATL, A1, garancija",
+    "keywords": "Puma, motocikl, X, 9.9 kW, 120 km/h, 250 km, CATL, A1, garancija, oko 250 km, domet 250 km",
     "category": "motocikli",
     "source": "proizvodi"
   },
@@ -131,7 +131,7 @@
     "id": 109,
     "question": "Koje su karakteristike Puma motocikla PRO varijante?",
     "answer": "Puma motocikl PRO varijante ima snagu 9.9 kW, maksimalnu brzinu 120 km/h, obrtni moment 180 Nm i domet do 300 km. Baterija nije prenosna, kapaciteta 156 Ah, CATL Li-Ion. Za vožnju je potrebna A1 kategorija. Garancija na vozilo je 2 godine, na bateriju 3 godine ili 30.000 km. Proizvod je homologovan za Srbiju i dostupan je na zahtev. Cenu i detaljnije informacije pogledajte <a href='https://zapmoto.rs/product/elektricni-motocikl-puma/' target='_blank' style='color: #069806; text-decoration: underline;'>ovde</a>.",
-    "keywords": "Puma, motocikl, PRO, 9.9 kW, 120 km/h, 300 km, CATL, A1, garancija",
+    "keywords": "Puma, motocikl, PRO, 9.9 kW, 120 km/h, 300 km, CATL, A1, garancija, oko 300 km, domet 300 km",
     "category": "motocikli",
     "source": "proizvodi"
   },
@@ -147,7 +147,7 @@
     "id": 111,
     "question": "Koje su karakteristike Tiger motocikla X varijante?",
     "answer": "Tiger motocikl X varijante ima snagu 7 kW, maksimalnu brzinu 105 km/h, obrtni moment 150 Nm i domet do 200 km. Baterija nije prenosna, kapaciteta 117 Ah, CATL Li-Ion. Za vožnju je potrebna A1 kategorija. Garancija na vozilo je 2 godine, na bateriju 3 godine ili 30.000 km. Proizvod je homologovan za Srbiju i dostupan je na zahtev. Cenu i detaljnije informacije pogledajte <a href='https://zapmoto.rs/product/elektricni-motocikl-tiger/' target='_blank' style='color: #069806; text-decoration: underline;'>ovde</a>.",
-    "keywords": "Tiger, motocikl, X, 7 kW, 105 km/h, 200 km, CATL, A1, garancija",
+    "keywords": "Tiger, motocikl, X, 7 kW, 105 km/h, 200 km, CATL, A1, garancija, oko 200 km, domet 200 km",
     "category": "motocikli",
     "source": "proizvodi"
   },
@@ -155,7 +155,7 @@
     "id": 112,
     "question": "Koje su karakteristike Tiger motocikla PRO varijante?",
     "answer": "Tiger motocikl PRO varijante ima snagu 7 kW, maksimalnu brzinu 105 km/h, obrtni moment 150 Nm i domet do 250 km. Baterija nije prenosna, kapaciteta 156 Ah, CATL Li-Ion. Za vožnju je potrebna A1 kategorija. Garancija na vozilo je 2 godine, na bateriju 3 godine ili 30.000 km. Proizvod je homologovan za Srbiju i dostupan je na zahtev. Cenu i detaljnije informacije pogledajte <a href='https://zapmoto.rs/product/elektricni-motocikl-tiger/' target='_blank' style='color: #069806; text-decoration: underline;'>ovde</a>.",
-    "keywords": "Tiger, motocikl, PRO, 7 kW, 105 km/h, 250 km, CATL, A1, garancija",
+    "keywords": "Tiger, motocikl, PRO, 7 kW, 105 km/h, 250 km, CATL, A1, garancija, oko 250 km, domet 250 km",
     "category": "motocikli",
     "source": "proizvodi"
   },
@@ -171,7 +171,7 @@
     "id": 114,
     "question": "Koje su karakteristike Lion motocikla S varijante?",
     "answer": "Lion motocikl S varijante ima snagu 11 kW, maksimalnu brzinu 130 km/h, obrtni moment 102.4 Nm i domet do 200 km. Baterija nije prenosna, kapaciteta 117 Ah, CATL Li-Ion. Za vožnju je potrebna A1 kategorija. Garancija na vozilo je 2 godine, na bateriju 4 godine ili 40.000 km. Proizvod je homologovan za Srbiju i dostupan je na zahtev. Cenu i detaljnije informacije pogledajte <a href='https://zapmoto.rs/product/elektricni-motocikl-lion/' target='_blank' style='color: #069806; text-decoration: underline;'>ovde</a>.",
-    "keywords": "Lion, motocikl, S, 11 kW, 130 km/h, 200 km, CATL, A1, garancija",
+    "keywords": "Lion, motocikl, S, 11 kW, 130 km/h, 200 km, CATL, A1, garancija, oko 200 km, domet 200 km",
     "category": "motocikli",
     "source": "proizvodi"
   },
@@ -179,7 +179,7 @@
     "id": 115,
     "question": "Koje su karakteristike Lion motocikla M varijante?",
     "answer": "Lion motocikl M varijante ima snagu 11 kW, maksimalnu brzinu 130 km/h, obrtni moment 102.4 Nm i domet do 250 km. Baterija nije prenosna, kapaciteta 150 Ah, CATL Li-Ion. Za vožnju je potrebna A1 kategorija. Garancija na vozilo je 2 godine, na bateriju 4 godine ili 40.000 km. Proizvod je homologovan za Srbiju i dostupan je na zahtev. Cenu i detaljnije informacije pogledajte <a href='https://zapmoto.rs/product/elektricni-motocikl-lion/' target='_blank' style='color: #069806; text-decoration: underline;'>ovde</a>.",
-    "keywords": "Lion, motocikl, M, 11 kW, 130 km/h, 250 km, CATL, A1, garancija",
+    "keywords": "Lion, motocikl, M, 11 kW, 130 km/h, 250 km, CATL, A1, garancija, oko 250 km, domet 250 km",
     "category": "motocikli",
     "source": "proizvodi"
   },
@@ -187,7 +187,7 @@
     "id": 116,
     "question": "Koje su karakteristike Lion motocikla X varijante?",
     "answer": "Lion motocikl X varijante ima snagu 11 kW, maksimalnu brzinu 150 km/h, obrtni moment 102.4 Nm i domet do 280 km. Baterija nije prenosna, kapaciteta 180 Ah, CATL Li-Ion. Za vožnju je potrebna A1 kategorija. Garancija na vozilo je 2 godine, na bateriju 6 godina ili 60.000 km. Proizvod je homologovan za Srbiju i dostupan je na zahtev. Cenu i detaljnije informacije pogledajte <a href='https://zapmoto.rs/product/elektricni-motocikl-lion/' target='_blank' style='color: #069806; text-decoration: underline;'>ovde</a>.",
-    "keywords": "Lion, motocikl, X, 11 kW, 150 km/h, 280 km, CATL, A1, garancija",
+    "keywords": "Lion, motocikl, X, 11 kW, 150 km/h, 280 km, CATL, A1, garancija, oko 280 km, domet 280 km, oko 250 km, domet 250 km",
     "category": "motocikli",
     "source": "proizvodi"
   },
