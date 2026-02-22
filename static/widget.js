@@ -241,14 +241,21 @@ class SmartChatWidget {
         console.log("🔍 Primljen text za prikaz:", text);
         console.log("📏 Dužina teksta:", text.length);
         
-        // Konvertuj Markdown linkove u HTML
+        // Konvertuj linkove u HTML
         let htmlText = text;
         
-        // Pronađi sve Markdown linkove [tekst](url)
+        // Prvo konvertuj obične URL-ove u klikabilne linkove
+        const urlRegex = /(https?:\/\/[^\s]+)/g;
+        if (urlRegex.test(htmlText)) {
+            console.log("🔎 Pronađen običan URL, konvertujem...");
+            htmlText = htmlText.replace(urlRegex, '<a href="$1" target="_blank" style="color: #069806; text-decoration: underline;">$1</a>');
+        }
+        
+        // Zatim konvertuj Markdown linkove [tekst](url)
         const markdownLinkRegex = /\[([^\]]+)\]\(([^)]+)\)/g;
-        if (markdownLinkRegex.test(text)) {
+        if (markdownLinkRegex.test(htmlText)) {
             console.log("🔎 Pronađen Markdown link, konvertujem...");
-            htmlText = text.replace(markdownLinkRegex, '<a href="$2" target="_blank" style="color: #069806; text-decoration: underline;">$1</a>');
+            htmlText = htmlText.replace(markdownLinkRegex, '<a href="$2" target="_blank" style="color: #069806; text-decoration: underline;">$1</a>');
         }
         
         // Proveri da li ima HTML tagova
