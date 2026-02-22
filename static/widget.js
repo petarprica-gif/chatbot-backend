@@ -6,7 +6,7 @@
 class SmartChatWidget {
     constructor(config) {
         this.config = {
-                        apiUrl: 'https://chatbot-backend-hcvx.onrender.com/webhook',  // <<< OVO PROMENITE KASNIJE
+            apiUrl: 'https://chatbot-backend-hcvx.onrender.com/webhook',
             ...config
         };
         
@@ -237,6 +237,23 @@ class SmartChatWidget {
     }
     
     addMessage(text, sender, metadata = null) {
+        // Debug: prikaži šta stiže
+        console.log("🔍 Primljen text za prikaz:", text);
+        console.log("📏 Dužina teksta:", text.length);
+        
+        // Konvertuj Markdown linkove u HTML
+        let htmlText = text;
+        
+        // Pronađi sve Markdown linkove [tekst](url)
+        const markdownLinkRegex = /\[([^\]]+)\]\(([^)]+)\)/g;
+        if (markdownLinkRegex.test(text)) {
+            console.log("🔎 Pronađen Markdown link, konvertujem...");
+            htmlText = text.replace(markdownLinkRegex, '<a href="$2" target="_blank" style="color: #069806; text-decoration: underline;">$1</a>');
+        }
+        
+        // Proveri da li ima HTML tagova
+        console.log("🔎 Sadrži <a tag?", htmlText.includes('<a'));
+        
         const messageDiv = document.createElement('div');
         messageDiv.style.cssText = `
             margin-bottom: 12px;
@@ -257,7 +274,8 @@ class SmartChatWidget {
                 : 'background: white; color: #1e293b; border-bottom-left-radius: 4px; box-shadow: 0 1px 2px rgba(0,0,0,0.1);'}
         `;
         
-        bubble.textContent = text;
+        // Koristimo konvertovani HTML
+        bubble.innerHTML = htmlText;
         
         // Dodaj vreme
         const time = document.createElement('div');
@@ -408,7 +426,7 @@ function initChatWidget() {
         primaryColor: '#069806',
         title: 'Vaša ZAPmoto podrška',
         subtitle: 'Pitajte nas bilo šta o električnim skuterima',
-	position: 'bottom-right',
+        position: 'bottom-right',
         apiUrl: 'https://chatbot-backend-hcvx.onrender.com/webhook'
     });
 }
@@ -416,14 +434,12 @@ function initChatWidget() {
 // Pokušaj odmah ako je dokument već učitan
 if (document.readyState === 'complete' || document.readyState === 'interactive') {
     console.log("Dokument već spreman, pokrećem odmah");
-    setTimeout(initChatWidget, 100); // Mali timeout da se osigura redosled
+    setTimeout(initChatWidget, 100);
 } else {
-    // Ako nije, sačekaj DOMContentLoaded
     console.log("Čekam DOMContentLoaded...");
     document.addEventListener('DOMContentLoaded', initChatWidget);
 }
 
-// Rezervna opcija - uvek sačekaj load
 window.addEventListener('load', function() {
     console.log("Load event - pokrećem ako već nije pokrenuto");
     initChatWidget();
