@@ -485,14 +485,17 @@ class ContextAwareChatbot:
         logger.info(f"Dužina istorije: {len(conversation_history)}")
         logger.info(f"Poruka: {message}")
         
-        # Proveri da li je ovo nastavak prethodne preporuke
+        # Prošireno pamćenje prethodnih preporuka - uzima iz poslednjih 10 poruka
         previous_models = []
         if conversation_history:
-            for msg in reversed(conversation_history):
+            # Uzmi sve prethodne preporuke iz poslednjih 10 poruka (umesto 5)
+            for msg in reversed(conversation_history[-10:]):
                 if msg.get('intent') == 'product_recommendation' and 'recommended_models' in msg:
-                    previous_models = msg.get('recommended_models', [])
-                    logger.info(f"Pronađene prethodne preporuke: {previous_models}")
-                    break
+                    previous_models.extend(msg.get('recommended_models', []))
+                    logger.info(f"Dodajem preporuke iz poruke: {msg.get('recommended_models', [])}")
+            # Ukloni duplikate
+            previous_models = list(set(previous_models))
+            logger.info(f"Sve prethodne preporuke: {previous_models}")
         
         logger.info(f"Prethodno preporučeni modeli: {previous_models}")
         
@@ -529,7 +532,7 @@ class ContextAwareChatbot:
             else:
                 return "Nažalost, trenutno nemamo modele koji u potpunosti odgovaraju tvojim kriterijumima. Preporučujem ti da pogledaš našu ponudu na sajtu: https://zapmoto.rs/product-category/elektricni-skuteri-i-motori/ ili da nas kontaktiraš za dodatnu pomoć.", []
         
-        # ===== NOVO: Sortiranje modela po dometu (od najvećeg ka najmanjem) =====
+        # ===== Sortiranje modela po dometu (od najvećeg ka najmanjem) =====
         def get_domet(model):
             answer = model.get('answer', '')
             domet_match = re.search(r'domet do (\d+) km', answer)
@@ -541,10 +544,10 @@ class ContextAwareChatbot:
         matching_models.sort(key=get_domet, reverse=True)
         logger.info(f"Modeli sortirani po dometu: {[get_domet(m) for m in matching_models[:5]]}")
         
-        # Pripremi listu modela za prikaz
+        # Pripremi listu modela za prikaz (maksimalno 5)
         models_text = ""
         recommended_ids = []
-        for i, model in enumerate(matching_models[:5], 1):  # Maksimalno 5 modela
+        for i, model in enumerate(matching_models[:5], 1):
             # Sačuvaj ID za eventualno naknadno filtriranje
             model_id = model.get('id')
             if model_id:
