@@ -214,6 +214,22 @@ class ContextAwareChatbot:
         Returns:
             Detektovana namera
         """
+        # PROŠIRENA LISTA POZDRAVA - prvo proveravamo
+        greetings = [
+            'dobro jutro', 'dobar dan', 'dobro veče', 'dobro vece',
+            'zdravo', 'ćao', 'cao', 'hej', 'pozdrav', 'pozz',
+            'halo', 'ej', 'dober dan', 'dober večer',
+            'good morning', 'good afternoon', 'good evening', 'hello', 'hi'
+        ]
+        
+        message_lower = message.lower().strip()
+        
+        # Provera za pozdrave
+        for greeting in greetings:
+            if greeting in message_lower:
+                logger.info(f"✅ Prepoznat pozdrav: '{greeting}' u poruci '{message}'")
+                return Intent.GREETING
+        
         # Prvo proveri da li je u pitanju nastavak preporuke (kontekst)
         if conversation_history and len(conversation_history) > 0:
             last_assistant_msg = None
@@ -228,12 +244,6 @@ class ContextAwareChatbot:
                 if any(keyword in message.lower() for keyword in rejection_keywords):
                     logger.info("Prepoznato odbijanje preporuke, ostajem u PRODUCT_RECOMMENDATION modu")
                     return Intent.PRODUCT_RECOMMENDATION
-        
-        # NOVO: Provera za osnovne pozdrave (pre OpenAI poziva)
-        greetings = ['dobro jutro', 'dobro veče', 'dobar dan', 'zdravo', 'ćao', 'hej', 'cao', 'pozdrav']
-        if any(greeting in message.lower() for greeting in greetings):
-            logger.info("Prepoznat pozdrav pre OpenAI-ja")
-            return Intent.GREETING
         
         # Pravimo prompt za OpenAI sa kontekstom
         system_prompt = """
@@ -278,6 +288,62 @@ class ContextAwareChatbot:
         except Exception as e:
             logger.error(f"Greška pri detekciji namere: {str(e)}")
             return Intent.UNKNOWN
+    
+    def generate_greeting_response(self, message: str, user_id: str, conversation_id: str = None, channel: str = "web") -> Dict[str, Any]:
+        """
+        Generiše odgovor na pozdrav.
+        """
+        # Mapa pozdrava i odgovora (možeš proširiti po želji)
+        greeting_responses = {
+            'dobro jutro': 'Dobro jutro! Kako vam mogu pomoći danas?',
+            'dobar dan': 'Dobar dan! Drago mi je da ste tu. Kako vam mogu pomoći?',
+            'dobro veče': 'Dobro veče! Kako vam mogu pomoći?',
+            'dobro vece': 'Dobro veče! Kako vam mogu pomoći?',
+            'zdravo': 'Zdravo! Dobrodošli. Kako vam mogu pomoći?',
+            'ćao': 'Ćao! Kako vam mogu pomoći?',
+            'cao': 'Ćao! Kako vam mogu pomoći?',
+            'hej': 'Hej! Kako vam mogu pomoći?',
+            'pozdrav': 'Pozdrav! Kako vam mogu pomoći?',
+            'good morning': 'Good morning! How can I help you?',
+            'good afternoon': 'Good afternoon! How can I help you?',
+            'good evening': 'Good evening! How can I help you?',
+            'hello': 'Hello! How can I help you?',
+            'hi': 'Hi! How can I help you?'
+        }
+        
+        message_lower = message.lower()
+        response_text = "Zdravo! Kako vam mogu pomoći?"  # Default odgovor
+        
+        # Pronađi odgovarajući odgovor
+        for greeting, response in greeting_responses.items():
+            if greeting in message_lower:
+                response_text = response
+                break
+        
+        # Sačuvaj poruke u memoriju
+        memory_key = f"{user_id}:{conversation_id}" if conversation_id else user_id
+        self.add_to_conversation(memory_key, {
+            'role': 'user',
+            'content': message,
+            'timestamp': datetime.now().isoformat()
+        })
+        
+        self.add_to_conversation(memory_key, {
+            'role': 'assistant',
+            'content': response_text,
+            'timestamp': datetime.now().isoformat(),
+            'intent': 'greeting',
+            'knowledge_used': []
+        })
+        
+        return {
+            'response': response_text,
+            'intent': 'greeting',
+            'conversation_id': conversation_id,
+            'escalation_needed': False,
+            'knowledge_sources': [],
+            'channel_specific': self.get_channel_specific_response(channel, response_text)
+        }
     
     def extract_criteria_from_message(self, message: str) -> Dict[str, any]:
         """
@@ -684,6 +750,11 @@ Da li mogu da vam pomognem oko nečeg drugog?
             # Detektuj nameru
             intent = self.detect_intent(message, conversation.messages)
             logger.info(f"Detektovana namera: {intent}")
+            
+            # NOVO: Ako je pozdrav, generiši odgovor na pozdrav
+            if intent == Intent.GREETING:
+                logger.info("Obrada pozdrava...")
+                return self.generate_greeting_response(message, user_id, conversation_id, channel)
             
             # Proveri da li je potrebna eskalacija
             if self.should_escalate(message, intent, conversation):
