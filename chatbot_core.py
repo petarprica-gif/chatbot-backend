@@ -229,6 +229,12 @@ class ContextAwareChatbot:
                     logger.info("Prepoznato odbijanje preporuke, ostajem u PRODUCT_RECOMMENDATION modu")
                     return Intent.PRODUCT_RECOMMENDATION
         
+        # NOVO: Provera za osnovne pozdrave (pre OpenAI poziva)
+        greetings = ['dobro jutro', 'dobro veče', 'dobar dan', 'zdravo', 'ćao', 'hej', 'cao', 'pozdrav']
+        if any(greeting in message.lower() for greeting in greetings):
+            logger.info("Prepoznat pozdrav pre OpenAI-ja")
+            return Intent.GREETING
+        
         # Pravimo prompt za OpenAI sa kontekstom
         system_prompt = """
         Ti si AI asistent za detekciju namere. Na osnovu korisničke poruke i istorije razgovora,
@@ -472,24 +478,42 @@ class ContextAwareChatbot:
         """
         Nudi korisniku opcije za kontakt kada chatbot ne može da odgovori.
         """
-        # Broj telefona (isti za sve kanale)
+        # Broj telefona
         phone = "+381603534000"
         
         # Linkovi za direktan chat
         whatsapp_link = f"https://wa.me/{phone}"
         viber_link = f"viber://chat?number={phone}"
-        sms_link = f"sms:{phone}"  # Za mobilne uređaje otvara SMS aplikaciju
+        sms_link = f"sms:{phone}"
         
-        # Poruka sa HTML linkovima i ikonama u originalnim bojama
+        # Vertikalno poređane opcije sa ikonama i nazivima (sve klikabilno)
         contact_message = f"""
 Nažalost, nemam odgovor na ovo pitanje.
 
 Za dodatnu pomoć, možete nas kontaktirati putem:
 
-<a href="{whatsapp_link}" target="_blank" style="color: #25D366; text-decoration: none; font-weight: bold;">📱 WhatsApp</a> • 
-<a href="{viber_link}" target="_blank" style="color: #7360F2; text-decoration: none; font-weight: bold;">📱 Viber</a> • 
-<a href="{sms_link}" style="color: #34B7F1; text-decoration: none; font-weight: bold;">✉️ SMS</a>
+<br><br>
+<div style="margin-bottom: 20px;">
+    <a href="{whatsapp_link}" target="_blank" style="color: #25D366; text-decoration: none; font-size: 18px; display: inline-block;">
+        <span style="font-size: 24px; vertical-align: middle;">📱</span>
+        <span style="vertical-align: middle; font-weight: bold; color: #25D366; margin-left: 8px;">WhatsApp</span>
+    </a>
+</div>
 
+<div style="margin-bottom: 20px;">
+    <a href="{viber_link}" target="_blank" style="color: #7360F2; text-decoration: none; font-size: 18px; display: inline-block;">
+        <span style="font-size: 24px; vertical-align: middle;">📱</span>
+        <span style="vertical-align: middle; font-weight: bold; color: #7360F2; margin-left: 8px;">Viber</span>
+    </a>
+</div>
+
+<div style="margin-bottom: 20px;">
+    <a href="{sms_link}" style="color: #34B7F1; text-decoration: none; font-size: 18px; display: inline-block;">
+        <span style="font-size: 24px; vertical-align: middle;">✉️</span>
+        <span style="vertical-align: middle; font-weight: bold; color: #34B7F1; margin-left: 8px;">SMS</span>
+    </a>
+</div>
+<br>
 Naš tim će vam rado pomoći u najkraćem mogućem roku.
 
 Da li mogu da vam pomognem oko nečeg drugog?
