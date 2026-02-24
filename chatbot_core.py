@@ -468,6 +468,58 @@ class ContextAwareChatbot:
         logger.info(f"Prihvaćeni modeli: {[m.get('question', 'nepoznato') for m in filtered_models]}")
         return filtered_models
     
+    def offer_contact_options(self, message: str, user_id: str, conversation_id: str = None, channel: str = "web") -> Dict[str, Any]:
+        """
+        Nudi korisniku opcije za kontakt kada chatbot ne može da odgovori.
+        """
+        # Broj telefona (isti za sve kanale)
+        phone = "+381603534000"
+        
+        # Linkovi za direktan chat
+        whatsapp_link = f"https://wa.me/{phone}"
+        viber_link = f"viber://chat?number={phone}"
+        sms_link = f"sms:{phone}"  # Za mobilne uređaje otvara SMS aplikaciju
+        
+        # Poruka sa HTML linkovima i ikonama u originalnim bojama
+        contact_message = f"""
+Nažalost, nemam odgovor na ovo pitanje.
+
+Za dodatnu pomoć, možete nas kontaktirati putem:
+
+<a href="{whatsapp_link}" target="_blank" style="color: #25D366; text-decoration: none; font-weight: bold;">📱 WhatsApp</a> • 
+<a href="{viber_link}" target="_blank" style="color: #7360F2; text-decoration: none; font-weight: bold;">📱 Viber</a> • 
+<a href="{sms_link}" style="color: #34B7F1; text-decoration: none; font-weight: bold;">✉️ SMS</a>
+
+Naš tim će vam rado pomoći u najkraćem mogućem roku.
+
+Da li mogu da vam pomognem oko nečeg drugog?
+"""
+        
+        # Sačuvaj poruke u memoriju
+        memory_key = f"{user_id}:{conversation_id}" if conversation_id else user_id
+        self.add_to_conversation(memory_key, {
+            'role': 'user',
+            'content': message,
+            'timestamp': datetime.now().isoformat()
+        })
+        
+        self.add_to_conversation(memory_key, {
+            'role': 'assistant',
+            'content': contact_message,
+            'timestamp': datetime.now().isoformat(),
+            'intent': 'contact_offered',
+            'knowledge_used': []
+        })
+        
+        return {
+            'response': contact_message,
+            'intent': 'contact_offered',
+            'conversation_id': conversation_id,
+            'escalation_needed': False,
+            'knowledge_sources': [],
+            'channel_specific': self.get_channel_specific_response(channel, contact_message)
+        }
+    
     def generate_recommendation_response(self, message: str, criteria: Dict[str, any], conversation_history: List[Dict]) -> tuple:
         """
         Generiše odgovor sa preporukama na osnovu kriterijuma.
@@ -488,7 +540,7 @@ class ContextAwareChatbot:
         # Prošireno pamćenje prethodnih preporuka - uzima iz poslednjih 10 poruka
         previous_models = []
         if conversation_history:
-            # Uzmi sve prethodne preporuke iz poslednjih 10 poruka (umesto 5)
+            # Uzmi sve prethodne preporuke iz poslednjih 10 poruka
             for msg in reversed(conversation_history[-10:]):
                 if msg.get('intent') == 'product_recommendation' and 'recommended_models' in msg:
                     previous_models.extend(msg.get('recommended_models', []))
@@ -532,7 +584,7 @@ class ContextAwareChatbot:
             else:
                 return "Nažalost, trenutno nemamo modele koji u potpunosti odgovaraju tvojim kriterijumima. Preporučujem ti da pogledaš našu ponudu na sajtu: https://zapmoto.rs/product-category/elektricni-skuteri-i-motori/ ili da nas kontaktiraš za dodatnu pomoć.", []
         
-        # ===== Sortiranje modela po dometu (od najvećeg ka najmanjem) =====
+        # Sortiranje modela po dometu (od najvećeg ka najmanjem)
         def get_domet(model):
             answer = model.get('answer', '')
             domet_match = re.search(r'domet do (\d+) km', answer)
@@ -540,7 +592,6 @@ class ContextAwareChatbot:
                 return int(domet_match.group(1))
             return 0
         
-        # Sortiraj opadajuće (veći domet prvi)
         matching_models.sort(key=get_domet, reverse=True)
         logger.info(f"Modeli sortirani po dometu: {[get_domet(m) for m in matching_models[:5]]}")
         
@@ -548,33 +599,25 @@ class ContextAwareChatbot:
         models_text = ""
         recommended_ids = []
         for i, model in enumerate(matching_models[:5], 1):
-            # Sačuvaj ID za eventualno naknadno filtriranje
             model_id = model.get('id')
             if model_id:
                 recommended_ids.append(model_id)
                 logger.info(f"Dodajem model ID {model_id} u preporuke (domet: {get_domet(model)} km)")
             
-            # Izvuci naziv modela iz pitanja
             question = model.get('question', '')
             model_name = question.replace("Koje su karakteristike ", "").replace("?", "").strip()
-            
-            # Izvuci ključne karakteristike iz odgovora
             answer = model.get('answer', '')
             
-            # Izvuci domet
             domet_match = re.search(r'domet do (\d+) km', answer)
             domet = domet_match.group(1) if domet_match else "nepoznat"
             
-            # Izvuci snagu
             snaga_match = re.search(r'snagu ([\d\.]+) kw', answer.lower())
             if not snaga_match:
                 snaga_match = re.search(r'(\d+(?:\.\d+)?)\s*kw', answer.lower())
             snaga = snaga_match.group(1) if snaga_match else "?"
             
-            # Izvuci kategoriju vozačke
             vozacka = "AM" if "am kategorija" in answer.lower() else "A1" if "a1 kategorija" in answer.lower() else "?"
             
-            # Izvuci link
             link_match = re.search(r"https?://[^\s]+", answer)
             link = link_match.group(0) if link_match else "#"
             
@@ -658,8 +701,22 @@ class ContextAwareChatbot:
             
             # Za ostale namere, koristi standardnu pretragu
             logger.info("Standardna obrada pitanja...")
+            
             # Pronađi relevantne informacije iz baze znanja
             relevant_knowledge = self.retrieve_relevant_knowledge(message)
+            
+            # Proveri da li imamo dovoljno relevantne informacije
+            has_good_answer = False
+            best_score = 0
+            if relevant_knowledge:
+                best_score = relevant_knowledge[0].get('relevance_score', 0)
+                if best_score > 0.6:  # Prag relevantnosti
+                    has_good_answer = True
+            
+            if not has_good_answer:
+                # Nemamo dobar odgovor - ponudi kontakt opcije
+                logger.info(f"Nema dovoljno relevantnog odgovora (najbolji score: {best_score:.2f})")
+                return self.offer_contact_options(message, user_id, conversation_id, channel)
             
             # Pripremi kontekst za generisanje odgovora
             context = {
@@ -786,7 +843,7 @@ class ContextAwareChatbot:
         Odlučuje da li je potrebna eskalacija ljudskom agentu
         """
         # Eksplicitni zahtev za agentom
-        escalation_keywords = ['agent', 'operater', 'čovek', 'govori sa', 'uživo', 'live chat']
+        escalation_keywords = ['agent', 'operater', 'čovek', 'govori sa', 'uživo', 'live chat', 'kontakt']
         if any(keyword in message.lower() for keyword in escalation_keywords):
             return True
         
