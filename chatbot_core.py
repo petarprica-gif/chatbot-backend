@@ -9,6 +9,7 @@ from dataclasses import dataclass, asdict
 from enum import Enum
 import logging
 import traceback
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +38,7 @@ class ConversationMemory:
     escalation_needed: bool = False
 
 class ContextAwareChatbot:
-    def __init__(self, api_key: str, knowledge_base_path: str = "knowledge_base.json"):
+    def __init__(self, api_key: str, knowledge_base_path: str = None):
         """
         Inicijalizacija chatbota sa kontekstualnom svešću
         
@@ -47,6 +48,13 @@ class ContextAwareChatbot:
         """
         self.api_key = api_key
         openai.api_key = api_key
+        
+        # Ako putanja nije data, koristi apsolutnu putanju
+        if knowledge_base_path is None:
+            # Uzmi putanju gde se nalazi ovaj fajl
+            current_dir = Path(__file__).parent.absolute()
+            knowledge_base_path = str(current_dir / "knowledge_base.json")
+            logger.info(f"Koristim apsolutnu putanju: {knowledge_base_path}")
         
         # NEMA Redis-a!
         # NEMA sentence-transformers!
@@ -133,6 +141,7 @@ class ContextAwareChatbot:
         - Politike (return, shipping, itd.)
         """
         try:
+            logger.info(f"Pokušavam da učitam bazu znanja sa putanje: {path}")
             with open(path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
             
@@ -144,7 +153,7 @@ class ContextAwareChatbot:
             logger.info(f"Učitano {len(data)} stavki u bazu znanja")
             return data
         except FileNotFoundError:
-            logger.warning("Baza znanja nije pronađena, kreiram praznu")
+            logger.error(f"Baza znanja nije pronađena na putanji: {path}")
             return []
         except Exception as e:
             logger.error(f"Greška pri učitavanju baze znanja: {str(e)}")
@@ -164,6 +173,7 @@ class ContextAwareChatbot:
             Lista relevantnih informacija iz baze znanja
         """
         if not self.knowledge_base:
+            logger.warning("Baza znanja je prazna, ne mogu da pretražujem")
             return []
         
         try:
@@ -198,6 +208,7 @@ class ContextAwareChatbot:
                         'source': similarities[i][2].get('source', 'knowledge_base')
                     })
             
+            logger.info(f"Pronađeno {len(relevant_items)} relevantnih stavki, najbolji score: {similarities[0][0] if similarities else 0}")
             return relevant_items
         except Exception as e:
             logger.error(f"Greška u retrieve_relevant_knowledge: {str(e)}")
