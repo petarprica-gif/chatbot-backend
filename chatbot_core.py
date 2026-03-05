@@ -642,4 +642,342 @@ Da li mogu da vam pomognem oko nečeg drugog?
                 recommended_ids.append(model_id)
             
             question = model.get('question', '')
-            model_name = question.replace("Koje su karakteristike ", "").replace("?", ""
+            model_name = question.replace("Koje su karakteristike ", "").replace("?", "").strip()
+            answer = model.get('answer', '')
+            
+            domet_match = re.search(r'domet do (\d+) km', answer)
+            domet = domet_match.group(1) if domet_match else "nepoznat"
+            
+            snaga_match = re.search(r'snagu ([\d\.]+) kw', answer.lower())
+            if not snaga_match:
+                snaga_match = re.search(r'(\d+(?:\.\d+)?)\s*kw', answer.lower())
+            snaga = snaga_match.group(1) if snaga_match else "?"
+            
+            vozacka = "AM" if "am kategorija" in answer.lower() else "A1" if "a1 kategorija" in answer.lower() else "?"
+            
+            link_match = re.search(r"https?://[^\s']+", answer)
+            link = link_match.group(0) if link_match else "#"
+            
+            item = f"{i}. <a href='{link}' target='_blank' style='color: #069806; text-decoration: underline; font-weight: bold;'>{model_name}</a> - Snaga: {snaga} kW, Domet: {domet} km, Kategorija: {vozacka}\n\n"
+            response_parts.append(item)
+        
+        response_parts.append("Ako želiš više informacija o nekom modelu, slobodno pitaj! Ako ti se neki od ovih modela ne sviđa, reci mi pa ću probati da nađem drugačije opcije.")
+        
+        response_text = "".join(response_parts)
+        
+        logger.info(f"Generisano {len(recommended_ids)} preporuka: {recommended_ids}")
+        return response_text, recommended_ids
+    
+    def generate_response(self, 
+                         message: str, 
+                         user_id: str, 
+                         conversation_id: str = None,
+                         channel: str = "web") -> Dict[str, Any]:
+        """
+        Generiše odgovor na korisničku poruku sa kontekstualnom svešću
+        """
+        
+        try:
+            logger.info(f"===== GENERATE_RESPONSE POZVAN =====")
+            logger.info(f"Poruka: {message}")
+            logger.info(f"User ID: {user_id}")
+            logger.info(f"Conversation ID: {conversation_id}")
+            logger.info(f"Channel: {channel}")
+            
+            memory_key = f"{user_id}:{conversation_id}" if conversation_id else user_id
+            conversation = self.get_or_create_conversation(memory_key, user_id, channel)
+            
+            intent = self.detect_intent(message, conversation.messages)
+            logger.info(f"Detektovana namera: {intent}")
+            
+            if intent == Intent.GREETING:
+                logger.info("Obrada pozdrava...")
+                return self.generate_greeting_response(message, user_id, conversation_id, channel)
+            
+            if self.should_escalate(message, intent, conversation):
+                logger.info("Potrebna eskalacija ka agentu")
+                conversation.escalation_needed = True
+                return self.prepare_escalation(message, conversation)
+            
+            if intent == Intent.PRODUCT_RECOMMENDATION:
+                logger.info("Obrada preporuka...")
+                criteria = self.extract_criteria_from_message(message)
+                response_text, recommended_ids = self.generate_recommendation_response(message, criteria, conversation.messages)
+                
+                self.add_to_conversation(memory_key, {
+                    'role': 'user',
+                    'content': message,
+                    'timestamp': datetime.now().isoformat()
+                })
+                
+                self.add_to_conversation(memory_key, {
+                    'role': 'assistant',
+                    'content': response_text,
+                    'timestamp': datetime.now().isoformat(),
+                    'intent': intent.value,
+                    'recommended_models': recommended_ids,
+                    'knowledge_used': []
+                })
+                
+                return {
+                    'response': response_text,
+                    'intent': intent.value,
+                    'conversation_id': conversation_id,
+                    'escalation_needed': False,
+                    'knowledge_sources': [],
+                    'channel_specific': self.get_channel_specific_response(channel, response_text)
+                }
+            
+            logger.info("Standardna obrada pitanja...")
+            relevant_knowledge = self.retrieve_relevant_knowledge(message)
+            
+            has_good_answer = False
+            best_score = 0
+            if relevant_knowledge:
+                best_score = relevant_knowledge[0].get('relevance_score', 0)
+                if best_score > 0.6:
+                    has_good_answer = True
+            
+            if not has_good_answer:
+                logger.info(f"Nema dovoljno relevantnog odgovora (najbolji score: {best_score:.2f})")
+                # SADA ODMAH NUDI KONTAKT OPCIJE, NE KORISTI AI
+                return self.offer_contact_options(message, user_id, conversation_id, channel)
+            
+            context = {
+                'intent': intent.value,
+                'relevant_knowledge': relevant_knowledge,
+                'user_id': user_id,
+                'channel': channel,
+                'conversation_history': conversation.messages[-10:],
+                'user_context': conversation.context
+            }
+            
+            response_text = self.generate_llm_response(message, context)
+            
+            self.add_to_conversation(memory_key, {
+                'role': 'user',
+                'content': message,
+                'timestamp': datetime.now().isoformat()
+            })
+            
+            self.add_to_conversation(memory_key, {
+                'role': 'assistant',
+                'content': response_text,
+                'timestamp': datetime.now().isoformat(),
+                'intent': intent.value,
+                'knowledge_used': [k['source'] for k in relevant_knowledge] if relevant_knowledge else []
+            })
+            
+            response = {
+                'response': response_text,
+                'intent': intent.value,
+                'conversation_id': conversation_id,
+                'escalation_needed': False,
+                'knowledge_sources': [k['source'] for k in relevant_knowledge] if relevant_knowledge else [],
+                'channel_specific': self.get_channel_specific_response(channel, response_text)
+            }
+            
+            logger.info("Odgovor uspešno generisan")
+            return response
+            
+        except Exception as e:
+            logger.error(f"❌ Greška u generate_response: {str(e)}")
+            logger.error(traceback.format_exc())
+            return {
+                'response': "Došlo je do tehničke greške. Molim vas pokušajte ponovo ili kontaktirajte podršku.",
+                'intent': 'unknown',
+                'conversation_id': conversation_id,
+                'escalation_needed': True,
+                'knowledge_sources': []
+            }
+    
+    def generate_llm_response(self, message: str, context: Dict) -> str:
+        """
+        Generiše odgovor koristeći OpenAI sa ugrađenim kontekstom
+        """
+        
+        try:
+            knowledge_text = ""
+            if context['relevant_knowledge']:
+                knowledge_text = "Relevantne informacije:\n"
+                for idx, item in enumerate(context['relevant_knowledge']):
+                    content = item['content']
+                    knowledge_text += f"{idx+1}. Pitanje: {content.get('question', 'Informacija')}\n"
+                    knowledge_text += f"   Odgovor: {content.get('answer', content.get('content', ''))}\n"
+                    knowledge_text += f"   Izvor: {content.get('source', 'baza znanja')}\n\n"
+            
+            history_text = ""
+            if context['conversation_history']:
+                history_text = "Istorija razgovora:\n"
+                for msg in context['conversation_history']:
+                    role = "Korisnik" if msg['role'] == 'user' else "Asistent"
+                    history_text += f"{role}: {msg['content']}\n"
+            
+            system_prompt = f"""
+            Ti si profesionalni AI asistent za korisničku podršku i e-trgovinu.
+            
+            VAŽNA UPUTSTVA:
+            1. Budi koncizan, ali ljubazan - koristi prirodan ton razgovora
+            2. Odgovaraj isključivo na osnovu dostupnih informacija - ako ne znaš odgovor, priznaj to
+            3. Izbegavaj halucinacije - nemoj izmišljati informacije koje nisu u bazi znanja
+            4. Ako korisnik pita nešto što nije u tvojoj bazi znanja, ljubazno ga uputi da ćeš proslediti agentu
+            5. Strukturiraj informacije jasno - koristi bullet points gde je prikladno
+            6. Prati kontekst razgovora - ako se korisnik vraća na prethodnu temu, seti se toga
+            
+            Detektovana namera korisnika: {context['intent']}
+            Kanal komunikacije: {context['channel']}
+            """
+            
+            user_prompt = f"""
+            {history_text}
+            
+            {knowledge_text}
+            
+            Korisnik pita: {message}
+            
+            Molim te da odgovoriš na ovo pitanje na osnovu dostupnih informacija.
+            Ako informacija nije dostupna, reci da ćeš proslediti agentu.
+            """
+            
+            response = openai.ChatCompletion.create(
+                model="gpt-3.5-turbo",
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                max_tokens=500,
+                temperature=0.7
+            )
+            
+            response_text = response.choices[0].message.content.strip()
+            
+            # Konvertuj Markdown linkove u HTML
+            markdown_link_pattern = r'\[([^\]]+)\]\(([^)]+)\)'
+            response_text = re.sub(markdown_link_pattern, r'<a href="\2" target="_blank" style="color: #069806; text-decoration: underline;">\1</a>', response_text)
+            
+            return response_text
+            
+        except Exception as e:
+            logger.error(f"Greška pri generisanju odgovora: {str(e)}")
+            return "Izvinite, došlo je do tehničke greške. Molim vas pokušajte ponovo ili kontaktirajte našu podršku."
+    
+    def should_escalate(self, message: str, intent: Intent, conversation: ConversationMemory) -> bool:
+        escalation_keywords = ['agent', 'operater', 'čovek', 'govori sa', 'uživo', 'live chat', 'kontakt']
+        if any(keyword in message.lower() for keyword in escalation_keywords):
+            return True
+        
+        if intent == Intent.CONTACT_SUPPORT:
+            return True
+        
+        recent_messages = conversation.messages[-6:]
+        unknown_count = sum(1 for msg in recent_messages if msg.get('intent') == 'unknown')
+        if unknown_count >= 3:
+            return True
+        
+        return False
+    
+    def prepare_escalation(self, message: str, conversation: ConversationMemory) -> Dict[str, Any]:
+        transcript = []
+        for msg in conversation.messages:
+            transcript.append({
+                'role': msg['role'],
+                'content': msg['content'],
+                'timestamp': msg.get('timestamp', '')
+            })
+        
+        transcript.append({
+            'role': 'user',
+            'content': message,
+            'timestamp': datetime.now().isoformat()
+        })
+        
+        logger.info(f"Eskalacija za korisnika {conversation.user_id} pripremljena")
+        
+        return {
+            'response': "Povezujem vas sa našim agentom za korisničku podršku. Molim vas sačekajte trenutak.",
+            'escalation_needed': True,
+            'escalation_data': {
+                'transcript': transcript,
+                'conversation_id': conversation.user_id
+            },
+            'channel_specific': self.get_channel_specific_response(conversation.context.get('channel', 'web'), 
+                                                                   None, 
+                                                                   escalation=True)
+        }
+    
+    def get_or_create_conversation(self, memory_key: str, user_id: str, channel: str) -> ConversationMemory:
+        if memory_key in self.active_conversations:
+            return self.active_conversations[memory_key]
+        
+        conversation = ConversationMemory(
+            user_id=user_id,
+            messages=[],
+            last_updated=datetime.now(),
+            context={'channel': channel, 'start_time': datetime.now().isoformat()}
+        )
+        self.active_conversations[memory_key] = conversation
+        return conversation
+    
+    def add_to_conversation(self, memory_key: str, message: Dict):
+        if memory_key not in self.active_conversations:
+            return
+        
+        conversation = self.active_conversations[memory_key]
+        conversation.messages.append(message)
+        conversation.last_updated = datetime.now()
+        
+        if 'intent' in message:
+            conversation.context['last_intent'] = message['intent']
+    
+    def get_channel_specific_response(self, channel: str, text: str = None, escalation: bool = False) -> Dict:
+        channel_configs = {
+            'web': {
+                'type': 'text',
+                'options': {
+                    'quick_replies': True,
+                    'rich_text': True,
+                    'buttons': True
+                }
+            },
+            'whatsapp': {
+                'type': 'text',
+                'options': {
+                    'max_length': 4096,
+                    'interactive': True,
+                    'buttons': True
+                }
+            },
+            'viber': {
+                'type': 'text',
+                'options': {
+                    'rich_media': True,
+                    'keyboard': True
+                }
+            },
+            'telegram': {
+                'type': 'text',
+                'options': {
+                    'markdown': True,
+                    'inline_keyboards': True
+                }
+            }
+        }
+        
+        config = channel_configs.get(channel, channel_configs['web'])
+        
+        response = {
+            'channel': channel,
+            'type': config['type'],
+            'config': config['options']
+        }
+        
+        if text:
+            response['text'] = text
+            
+        if escalation:
+            response['escalation'] = {
+                'message': "Povezivanje sa agentom...",
+                'estimated_wait': "2-3 minuta"
+            }
+        
+        return response
