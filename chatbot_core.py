@@ -201,7 +201,8 @@ class ContextAwareChatbot:
             
             relevant_items = []
             for i in range(min(top_k, len(similarities))):
-                if similarities[i][0] > 0.5:  # Prag relevantnosti (možete prilagoditi)
+                # Prag za prihvatanje relevantnih stavki smanjen sa 0.5 na 0.3
+                if similarities[i][0] > 0.3:  # PRAG SMANJEN: 0.5 -> 0.3
                     relevant_items.append({
                         'content': similarities[i][2],
                         'relevance_score': float(similarities[i][0]),
@@ -226,10 +227,10 @@ class ContextAwareChatbot:
             Detektovana namera
         """
         # PROVERI NAJPRE DA LI POSTOJI U BAZI ZNANJA
-        # Ovo je NOVA logika koja sprečava da se "Pusa" prepozna kao pozdrav
         try:
             relevant = self.retrieve_relevant_knowledge(message, top_k=1)
-            if relevant and relevant[0].get('relevance_score', 0) > 0.6:
+            # Prag za prepoznavanje pitanja smanjen sa 0.6 na 0.3
+            if relevant and relevant[0].get('relevance_score', 0) > 0.3:  # PRAG SMANJEN: 0.6 -> 0.3
                 logger.info(f"✅ Prepoznato kao pitanje iz baze znanja (score: {relevant[0]['relevance_score']})")
                 return Intent.PRODUCT_QUESTION
         except Exception as e:
@@ -757,7 +758,8 @@ Da li mogu da vam pomognem oko nečeg drugog?
             best_score = 0
             if relevant_knowledge:
                 best_score = relevant_knowledge[0].get('relevance_score', 0)
-                if best_score > 0.6:
+                # Prag za davanje odgovora smanjen sa 0.6 na 0.4
+                if best_score > 0.4:  # PRAG SMANJEN: 0.6 -> 0.4
                     has_good_answer = True
             
             if not has_good_answer:
