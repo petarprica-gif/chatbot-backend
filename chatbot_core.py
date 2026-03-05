@@ -214,6 +214,16 @@ class ContextAwareChatbot:
         Returns:
             Detektovana namera
         """
+        # PROVERI NAJPRE DA LI POSTOJI U BAZI ZNANJA
+        # Ovo je NOVA logika koja sprečava da se "Pusa" prepozna kao pozdrav
+        try:
+            relevant = self.retrieve_relevant_knowledge(message, top_k=1)
+            if relevant and relevant[0].get('relevance_score', 0) > 0.6:
+                logger.info(f"✅ Prepoznato kao pitanje iz baze znanja (score: {relevant[0]['relevance_score']})")
+                return Intent.PRODUCT_QUESTION
+        except Exception as e:
+            logger.error(f"Greška pri proveri baze znanja: {str(e)}")
+        
         # PROŠIRENA LISTA POZDRAVA - prvo proveravamo
         greetings = [
             'dobro jutro', 'dobar dan', 'dobro veče', 'dobro vece',
@@ -226,7 +236,8 @@ class ContextAwareChatbot:
         
         # Provera za pozdrave
         for greeting in greetings:
-            if greeting in message_lower:
+            # Proveri da li je ceo message pozdrav ili počinje sa pozdravom
+            if message_lower == greeting or message_lower.startswith(greeting + ' ') or message_lower.startswith(greeting + ','):
                 logger.info(f"✅ Prepoznat pozdrav: '{greeting}' u poruci '{message}'")
                 return Intent.GREETING
         
