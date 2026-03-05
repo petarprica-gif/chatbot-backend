@@ -758,8 +758,8 @@ Da li mogu da vam pomognem oko nečeg drugog?
             best_score = 0
             if relevant_knowledge:
                 best_score = relevant_knowledge[0].get('relevance_score', 0)
-                # Prag za davanje odgovora smanjen sa 0.6 na 0.35
-                if best_score > 0.35:  # PRAG SMANJEN: 0.4 -> 0.35
+                # Prag za davanje odgovora smanjen sa 0.35 na 0.30
+                if best_score > 0.30:  # PRAG SMANJEN: 0.35 -> 0.30
                     has_good_answer = True
             
             if not has_good_answer:
