@@ -226,9 +226,12 @@ class ContextAwareChatbot:
         Returns:
             Detektovana namera
         """
-        # PROVERI NAJPRE DA LI POSTOJI U BAZI ZNANJA
+        # Konvertujemo poruku u mala slova za sva poređenja
+        message_lower = message.lower().strip()
+        
+        # PROVERI NAJPRE DA LI POSTOJI U BAZI ZNANJA (koristimo mala slova)
         try:
-            relevant = self.retrieve_relevant_knowledge(message, top_k=1)
+            relevant = self.retrieve_relevant_knowledge(message_lower, top_k=1)
             # Prag za prepoznavanje pitanja smanjen sa 0.6 na 0.3
             if relevant and relevant[0].get('relevance_score', 0) > 0.3:  # PRAG SMANJEN: 0.6 -> 0.3
                 logger.info(f"✅ Prepoznato kao pitanje iz baze znanja (score: {relevant[0]['relevance_score']})")
@@ -244,9 +247,7 @@ class ContextAwareChatbot:
             'good morning', 'good afternoon', 'good evening', 'hello', 'hi'
         ]
         
-        message_lower = message.lower().strip()
-        
-        # Provera za pozdrave
+        # Provera za pozdrave (koristimo mala slova)
         for greeting in greetings:
             # Proveri da li je ceo message pozdrav ili počinje sa pozdravom
             if message_lower == greeting or message_lower.startswith(greeting + ' ') or message_lower.startswith(greeting + ','):
@@ -264,7 +265,7 @@ class ContextAwareChatbot:
             # Ako je poslednja poruka bila preporuka, a korisnik odbija
             if last_assistant_msg and last_assistant_msg.get('intent') == 'product_recommendation':
                 rejection_keywords = ['ne sviđa', 'drugi', 'neki drugi', 'drugačiji', 'neću', 'ne želim', 'nemoj']
-                if any(keyword in message.lower() for keyword in rejection_keywords):
+                if any(keyword in message_lower for keyword in rejection_keywords):
                     logger.info("Prepoznato odbijanje preporuke, ostajem u PRODUCT_RECOMMENDATION modu")
                     return Intent.PRODUCT_RECOMMENDATION
         
@@ -530,11 +531,29 @@ class ContextAwareChatbot:
         logger.info(f"Prihvaćeni modeli: {[m.get('question', 'nepoznato') for m in filtered_models]}")
         return filtered_models
     
+    def extract_brand_from_query(self, query: str) -> str:
+        """
+        Izvlači naziv brenda iz upita (Pusa, Lipo, Deer, E2Go, Puma, Tiger, Lion)
+        
+        Args:
+            query: Korisnički upit
+            
+        Returns:
+            Naziv brenda u malim slovima ili prazan string
+        """
+        query_lower = query.lower()
+        brands = ['pusa', 'lipo', 'deer', 'e2go', 'puma', 'tiger', 'lion']
+        
+        for brand in brands:
+            if brand in query_lower:
+                return brand
+        return ""
+    
     def format_product_response(self, relevant_items: List[Dict], original_query: str = "") -> str:
         """
         Formatiram odgovor sa svim relevantnim proizvodima.
         Svaki proizvod je u novom redu sa jasno odvojenim karakteristikama.
-        Ako query sadrži "pusa", prikazujemo samo Pusa modele.
+        Filtrira po brendu ako je prepoznat u upitu.
         
         Args:
             relevant_items: Lista relevantnih proizvoda iz baze znanja
@@ -546,12 +565,21 @@ class ContextAwareChatbot:
         if not relevant_items:
             return ""
         
-        # Filtriraj ako pitanje sadrži "pusa"
-        if original_query and "pusa" in original_query.lower():
-            relevant_items = [item for item in relevant_items 
-                            if "pusa" in item['content'].get('question', '').lower()]
-            if not relevant_items:
-                return "Nažalost, nisam pronašao informacije o Pusi koje odgovaraju vašem pitanju."
+        # Izvuci brend iz upita
+        brand = self.extract_brand_from_query(original_query)
+        
+        # Filtriraj po brendu ako je prepoznat
+        if brand:
+            filtered_items = []
+            for item in relevant_items:
+                question_lower = item['content'].get('question', '').lower()
+                # Proveri da li pitanje sadrži naziv brenda
+                if brand in question_lower:
+                    filtered_items.append(item)
+            
+            # Ako ima filtriranih, koristi njih, inače ostavi sve
+            if filtered_items:
+                relevant_items = filtered_items
         
         response_parts = ["Na osnovu vašeg pitanja, evo relevantnih informacija:"]
         
@@ -817,7 +845,7 @@ Da li mogu da vam pomognem oko nečeg drugog?
                 return self.offer_contact_options(message, user_id, conversation_id, channel)
             
             # KORISTI NOVU FUNKCIJU ZA FORMATIRANJE SVIH RELEVANTNIH PROIZVODA
-            # Prosleđujemo i originalno pitanje za filtriranje
+            # Prosleđujemo i originalno pitanje za filtriranje po brendu
             response_text = self.format_product_response(relevant_knowledge, message)
             
             self.add_to_conversation(memory_key, {
