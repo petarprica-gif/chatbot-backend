@@ -159,7 +159,7 @@ class ContextAwareChatbot:
             logger.error(f"Greška pri učitavanju baze znanja: {str(e)}")
             return []
     
-    def retrieve_relevant_knowledge(self, query: str, top_k: int = 3) -> List[Dict]:
+    def retrieve_relevant_knowledge(self, query: str, top_k: int = 5) -> List[Dict]:
         """
         Pronalazi najrelevantnije informacije iz baze znanja za korisnički upit
         
@@ -167,7 +167,7 @@ class ContextAwareChatbot:
         
         Args:
             query: Korisnički upit
-            top_k: Broj najrelevantnijih rezultata
+            top_k: Broj najrelevantnijih rezultata (povećano sa 3 na 5)
         
         Returns:
             Lista relevantnih informacija iz baze znanja
@@ -530,6 +530,46 @@ class ContextAwareChatbot:
         logger.info(f"Prihvaćeni modeli: {[m.get('question', 'nepoznato') for m in filtered_models]}")
         return filtered_models
     
+    def format_product_response(self, relevant_items: List[Dict]) -> str:
+        """
+        Formatiram odgovor sa svim relevantnim proizvodima.
+        Svaki proizvod je u novom redu sa jasno odvojenim karakteristikama.
+        
+        Args:
+            relevant_items: Lista relevantnih proizvoda iz baze znanja
+        
+        Returns:
+            Formatiran string sa svim proizvodima
+        """
+        if not relevant_items:
+            return ""
+        
+        response_parts = ["Na osnovu vašeg pitanja, evo relevantnih informacija:\n"]
+        
+        for idx, item in enumerate(relevant_items, 1):
+            content = item['content']
+            question = content.get('question', '')
+            answer = content.get('answer', '')
+            
+            # Izvuci naziv modela iz pitanja
+            model_name = question.replace("Koje su karakteristike ", "").replace("?", "").strip()
+            
+            # Dodaj model kao poseban naslov
+            response_parts.append(f"\n{idx}. **{model_name}**")
+            
+            # Podeli odgovor na karakteristike
+            # Odstrani HTML linkove za pregledniji prikaz
+            clean_answer = re.sub(r'<a href="([^"]+)"[^>]*>ovde</a>', r'[više informacija](\1)', answer)
+            
+            # Dodaj svaku karakteristiku u novi red
+            response_parts.append(f"   - {clean_answer}")
+            
+            # Ako postoji cena u bazi, dodaj je posebno
+            if 'cena' in content:
+                response_parts.append(f"   - **Cena:** {content['cena']}")
+        
+        return "\n".join(response_parts)
+    
     def offer_contact_options(self, message: str, user_id: str, conversation_id: str = None, channel: str = "web") -> Dict[str, Any]:
         """
         Nudi korisniku opcije za kontakt sa originalnim ikonama aplikacija.
@@ -767,16 +807,8 @@ Da li mogu da vam pomognem oko nečeg drugog?
                 # SADA ODMAH NUDI KONTAKT OPCIJE, NE KORISTI AI
                 return self.offer_contact_options(message, user_id, conversation_id, channel)
             
-            context = {
-                'intent': intent.value,
-                'relevant_knowledge': relevant_knowledge,
-                'user_id': user_id,
-                'channel': channel,
-                'conversation_history': conversation.messages[-10:],
-                'user_context': conversation.context
-            }
-            
-            response_text = self.generate_llm_response(message, context)
+            # KORISTI NOVU FUNKCIJU ZA FORMATIRANJE SVIH RELEVANTNIH PROIZVODA
+            response_text = self.format_product_response(relevant_knowledge)
             
             self.add_to_conversation(memory_key, {
                 'role': 'user',
@@ -818,6 +850,7 @@ Da li mogu da vam pomognem oko nečeg drugog?
     def generate_llm_response(self, message: str, context: Dict) -> str:
         """
         Generiše odgovor koristeći OpenAI sa ugrađenim kontekstom
+        Ova funkcija se više ne koristi za proizvode, ali ostaje za druge namene
         """
         
         try:
