@@ -530,13 +530,15 @@ class ContextAwareChatbot:
         logger.info(f"Prihvaćeni modeli: {[m.get('question', 'nepoznato') for m in filtered_models]}")
         return filtered_models
     
-    def format_product_response(self, relevant_items: List[Dict]) -> str:
+    def format_product_response(self, relevant_items: List[Dict], original_query: str = "") -> str:
         """
         Formatiram odgovor sa svim relevantnim proizvodima.
         Svaki proizvod je u novom redu sa jasno odvojenim karakteristikama.
+        Ako query sadrži "pusa", prikazujemo samo Pusa modele.
         
         Args:
             relevant_items: Lista relevantnih proizvoda iz baze znanja
+            original_query: Originalno korisničko pitanje
         
         Returns:
             Formatiran string sa svim proizvodima
@@ -544,7 +546,14 @@ class ContextAwareChatbot:
         if not relevant_items:
             return ""
         
-        response_parts = ["Na osnovu vašeg pitanja, evo relevantnih informacija:\n"]
+        # Filtriraj ako pitanje sadrži "pusa"
+        if original_query and "pusa" in original_query.lower():
+            relevant_items = [item for item in relevant_items 
+                            if "pusa" in item['content'].get('question', '').lower()]
+            if not relevant_items:
+                return "Nažalost, nisam pronašao informacije o Pusi koje odgovaraju vašem pitanju."
+        
+        response_parts = ["Na osnovu vašeg pitanja, evo relevantnih informacija:"]
         
         for idx, item in enumerate(relevant_items, 1):
             content = item['content']
@@ -554,21 +563,21 @@ class ContextAwareChatbot:
             # Izvuci naziv modela iz pitanja
             model_name = question.replace("Koje su karakteristike ", "").replace("?", "").strip()
             
-            # Dodaj model kao poseban naslov sa praznim redom posle
-            response_parts.append(f"\n{idx}. **{model_name}**\n")
+            # Dodaj model kao poseban naslov sa HTML prelazima
+            response_parts.append(f"<br><br>{idx}. <strong>{model_name}</strong><br>")
             
             # Podeli odgovor na karakteristike
-            # Odstrani HTML linkove za pregledniji prikaz
-            clean_answer = re.sub(r'<a href="([^"]+)"[^>]*>ovde</a>', r'[više informacija](\1)', answer)
+            # Odstrani HTML linkove za pregledniji prikaz, ali sačuvaj linkove
+            clean_answer = answer.replace('<a href="', '<a target="_blank" href="')
             
             # Dodaj svaku karakteristiku u novi red
-            response_parts.append(f"   - {clean_answer}\n")
+            response_parts.append(f"&nbsp;&nbsp;&nbsp;- {clean_answer}<br>")
             
             # Ako postoji cena u bazi, dodaj je posebno
             if 'cena' in content:
-                response_parts.append(f"   - **Cena:** {content['cena']}\n")
+                response_parts.append(f"&nbsp;&nbsp;&nbsp;- <strong>Cena:</strong> {content['cena']}<br>")
         
-        return "\n".join(response_parts)
+        return "".join(response_parts)
     
     def offer_contact_options(self, message: str, user_id: str, conversation_id: str = None, channel: str = "web") -> Dict[str, Any]:
         """
@@ -808,7 +817,8 @@ Da li mogu da vam pomognem oko nečeg drugog?
                 return self.offer_contact_options(message, user_id, conversation_id, channel)
             
             # KORISTI NOVU FUNKCIJU ZA FORMATIRANJE SVIH RELEVANTNIH PROIZVODA
-            response_text = self.format_product_response(relevant_knowledge)
+            # Prosleđujemo i originalno pitanje za filtriranje
+            response_text = self.format_product_response(relevant_knowledge, message)
             
             self.add_to_conversation(memory_key, {
                 'role': 'user',

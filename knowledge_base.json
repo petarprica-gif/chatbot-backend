@@ -190,5 +190,13 @@
     "keywords": "Lion, Liona, Lionu, Lionom, Lionov, motocikl, motor, X varijanta, 11 kW, 150 km/h, 280 km, CATL, A1, garancija, električni motor Lion, model Lion, Lion motor, Lion X, Lionov motor, Lion model, Lion električni, oko 280 km, domet 280 km, oko 250 km, domet 250 km",
     "category": "motocikli",
     "source": "proizvodi"
+  },
+  {
+    "id": 200,
+    "question": "Kontakt informacije",
+    "answer": "Telefon: +381603534000, Email: info@zapmoto.rs. Naš tim vam je na raspolaganju svakog radnog dana od 9h do 17h. Možete nas kontaktirati i putem WhatsApp, Viber ili SMS na isti broj telefona.",
+    "keywords": "kontakt, telefon, email, broj telefona, mejl, adresa, prodavca, kontakt detalji, pozovem, email adresu, poziv, telefonski broj, elektronska pošta, kako da vas kontaktiram, kako da vas pozovem, gde se nalazite, radno vreme",
+    "category": "kontakt",
+    "source": "kontakt"
   }
 ]
