@@ -201,8 +201,8 @@ class ContextAwareChatbot:
             
             relevant_items = []
             for i in range(min(top_k, len(similarities))):
-                # Prag za prihvatanje relevantnih stavki smanjen sa 0.5 na 0.3
-                if similarities[i][0] > 0.3:  # PRAG SMANJEN: 0.5 -> 0.3
+                # Prag za prihvatanje relevantnih stavki smanjen sa 0.3 na 0.25
+                if similarities[i][0] > 0.25:  # PRAG SMANJEN: 0.3 -> 0.25
                     relevant_items.append({
                         'content': similarities[i][2],
                         'relevance_score': float(similarities[i][0]),
@@ -554,19 +554,19 @@ class ContextAwareChatbot:
             # Izvuci naziv modela iz pitanja
             model_name = question.replace("Koje su karakteristike ", "").replace("?", "").strip()
             
-            # Dodaj model kao poseban naslov
-            response_parts.append(f"\n{idx}. **{model_name}**")
+            # Dodaj model kao poseban naslov sa praznim redom posle
+            response_parts.append(f"\n{idx}. **{model_name}**\n")
             
             # Podeli odgovor na karakteristike
             # Odstrani HTML linkove za pregledniji prikaz
             clean_answer = re.sub(r'<a href="([^"]+)"[^>]*>ovde</a>', r'[više informacija](\1)', answer)
             
             # Dodaj svaku karakteristiku u novi red
-            response_parts.append(f"   - {clean_answer}")
+            response_parts.append(f"   - {clean_answer}\n")
             
             # Ako postoji cena u bazi, dodaj je posebno
             if 'cena' in content:
-                response_parts.append(f"   - **Cena:** {content['cena']}")
+                response_parts.append(f"   - **Cena:** {content['cena']}\n")
         
         return "\n".join(response_parts)
     
