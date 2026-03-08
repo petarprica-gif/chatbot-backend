@@ -554,6 +554,7 @@ class ContextAwareChatbot:
         Formatiram odgovor sa svim relevantnim proizvodima.
         Svaki proizvod je u novom redu sa jasno odvojenim karakteristikama.
         Filtrira po brendu ako je prepoznat u upitu.
+        Ako postoji kontakt informacija, prioritetno je prikazuje.
         
         Args:
             relevant_items: Lista relevantnih proizvoda iz baze znanja
@@ -565,21 +566,27 @@ class ContextAwareChatbot:
         if not relevant_items:
             return ""
         
-        # Izvuci brend iz upita
-        brand = self.extract_brand_from_query(original_query)
+        # Prvo proveri da li postoji kontakt informacija
+        kontakt_items = [item for item in relevant_items if item['content'].get('category') == 'kontakt']
         
-        # Filtriraj po brendu ako je prepoznat
-        if brand:
-            filtered_items = []
-            for item in relevant_items:
-                question_lower = item['content'].get('question', '').lower()
-                # Proveri da li pitanje sadrži naziv brenda
-                if brand in question_lower:
-                    filtered_items.append(item)
+        # Ako postoji kontakt i pitanje je o kontaktu, prikaži samo kontakt
+        if kontakt_items and any(word in original_query.lower() for word in ['kontakt', 'telefon', 'email', 'pozov', 'javite']):
+            relevant_items = kontakt_items
+        else:
+            # Inače, izvuci brend iz upita i filtriraj
+            brand = self.extract_brand_from_query(original_query)
             
-            # Ako ima filtriranih, koristi njih, inače ostavi sve
-            if filtered_items:
-                relevant_items = filtered_items
+            if brand:
+                filtered_items = []
+                for item in relevant_items:
+                    question_lower = item['content'].get('question', '').lower()
+                    # Proveri da li pitanje sadrži naziv brenda
+                    if brand in question_lower:
+                        filtered_items.append(item)
+                
+                # Ako ima filtriranih, koristi njih, inače ostavi sve
+                if filtered_items:
+                    relevant_items = filtered_items
         
         response_parts = ["Na osnovu vašeg pitanja, evo relevantnih informacija:"]
         
@@ -835,8 +842,8 @@ Da li mogu da vam pomognem oko nečeg drugog?
             best_score = 0
             if relevant_knowledge:
                 best_score = relevant_knowledge[0].get('relevance_score', 0)
-                # Prag za davanje odgovora smanjen sa 0.35 na 0.30
-                if best_score > 0.30:  # PRAG SMANJEN: 0.35 -> 0.30
+                # Prag za davanje odgovora smanjen sa 0.30 na 0.29
+                if best_score > 0.29:  # PRAG SMANJEN: 0.30 -> 0.29
                     has_good_answer = True
             
             if not has_good_answer:
