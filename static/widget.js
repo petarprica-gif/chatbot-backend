@@ -30,7 +30,7 @@ class SmartChatWidget {
         container.id = 'smart-chat-widget';
         container.style.cssText = `
             position: fixed;
-            ${this.config.position === 'bottom-right' ? 'bottom: 20px; right: 20px;' : 'bottom: 20px; left: 20px;'}
+            ${this.config.position === 'bottom-right' ? 'bottom: 150px; right: 22px;' : 'bottom: 150px; left: 22px;'}
             z-index: 9999;
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;
         `;
@@ -187,16 +187,16 @@ class SmartChatWidget {
         const message = this.input.value.trim();
         if (!message) return;
         
-        // Prikaži poruku korisnika
+        // Prikazi poruku korisnika
         this.addMessage(message, 'user');
         this.input.value = '';
         this.input.disabled = true;
         
-        // Prikaži indikator kucanja
+        // Prikazi indikator kucanja
         this.showTypingIndicator();
         
         try {
-            // Pošalji na server
+            // Posalji na server
             const response = await fetch(this.config.apiUrl, {
                 method: 'POST',
                 headers: {
@@ -219,7 +219,7 @@ class SmartChatWidget {
             // Ukloni indikator kucanja
             this.hideTypingIndicator();
             
-            // Prikaži odgovor
+            // Prikazi odgovor
             this.addMessage(data.response, 'bot', data);
             
             // Ako je potrebna eskalacija
@@ -237,29 +237,38 @@ class SmartChatWidget {
     }
     
     addMessage(text, sender, metadata = null) {
-        // Debug: prikaži šta stiže
+        // Debug: prikazi sta stize
         console.log("🔍 Primljen text za prikaz:", text);
         console.log("📏 Dužina teksta:", text.length);
         
-        // Konvertuj linkove u HTML
-        let htmlText = text;
-        
-        // Prvo konvertuj obične URL-ove u klikabilne linkove
-        const urlRegex = /(https?:\/\/[^\s]+)/g;
-        if (urlRegex.test(htmlText)) {
-            console.log("🔎 Pronađen običan URL, konvertujem...");
-            htmlText = htmlText.replace(urlRegex, '<a href="$1" target="_blank" style="color: #069806; text-decoration: underline;">$1</a>');
+        // ===== DODAJ OSNOVNE CSS STILOVE ZA LINKOVE =====
+        if (!document.getElementById('chat-link-styles')) {
+            const styleSheet = document.createElement('style');
+            styleSheet.id = 'chat-link-styles';
+            styleSheet.textContent = `
+                #smart-chat-widget a {
+                    color: #069806 !important;
+                    text-decoration: underline !important;
+                    font-weight: 500 !important;
+                    display: inline-block !important;
+                    margin: 2px 0 !important;
+                }
+                #smart-chat-widget a:hover {
+                    opacity: 0.8 !important;
+                }
+                #smart-chat-widget div[style*="margin-bottom: 20px"] {
+                    margin-bottom: 20px !important;
+                    display: block !important;
+                    clear: both !important;
+                }
+                #smart-chat-widget span {
+                    vertical-align: middle !important;
+                }
+            `;
+            document.head.appendChild(styleSheet);
+            console.log("🔧 Dodati osnovni CSS stilovi za linkove");
         }
-        
-        // Zatim konvertuj Markdown linkove [tekst](url)
-        const markdownLinkRegex = /\[([^\]]+)\]\(([^)]+)\)/g;
-        if (markdownLinkRegex.test(htmlText)) {
-            console.log("🔎 Pronađen Markdown link, konvertujem...");
-            htmlText = htmlText.replace(markdownLinkRegex, '<a href="$2" target="_blank" style="color: #069806; text-decoration: underline;">$1</a>');
-        }
-        
-        // Proveri da li ima HTML tagova
-        console.log("🔎 Sadrži <a tag?", htmlText.includes('<a'));
+        // ===== KRAJ CSS STILOVA =====
         
         const messageDiv = document.createElement('div');
         messageDiv.style.cssText = `
@@ -281,8 +290,9 @@ class SmartChatWidget {
                 : 'background: white; color: #1e293b; border-bottom-left-radius: 4px; box-shadow: 0 1px 2px rgba(0,0,0,0.1);'}
         `;
         
-        // Koristimo konvertovani HTML
-        bubble.innerHTML = htmlText;
+        // Direktno koristimo primljeni tekst sa innerHTML
+        bubble.innerHTML = text;
+        console.log("🔍 Korišćen innerHTML za prikaz");
         
         // Dodaj vreme
         const time = document.createElement('div');
@@ -298,7 +308,7 @@ class SmartChatWidget {
         bubble.appendChild(time);
         this.messagesArea.appendChild(messageDiv);
         
-        // Sačuvaj u lokalnu memoriju
+        // Sacuvaj u lokalnu memoriju
         this.messages.push({
             text,
             sender,
@@ -420,34 +430,45 @@ class SmartChatWidget {
     }
 }
 
-// Robusnija inicijalizacija - radi bez obzira na to kako se stranica učitava
-function initChatWidget() {
-    // Proveri da li već postoji da ne bismo duplirali
-    if (window.smartChatWidgetInstance) {
-        console.log("Chatbot već inicijalizovan");
-        return;
+// =============================================
+// TRENUTNA I DIREKTNA INICIJALIZACIJA
+// =============================================
+(function() {
+    console.log("🔥 widget.js učitan, pokrećem odmah...");
+    
+    // Pokušaj odmah
+    if (typeof SmartChatWidget !== 'undefined') {
+        console.log("✅ Klasa postoji, kreiram instancu...");
+        
+        // Proveri da li već postoji instanca
+        if (!window.smartChatWidgetInstance) {
+            window.smartChatWidgetInstance = new SmartChatWidget({
+                primaryColor: '#069806',
+                title: 'ZAPmoto podrška',
+                subtitle: 'Pitajte nas o električnim skuterima',
+                position: 'bottom-right',
+                apiUrl: 'https://chatbot-backend-hcvx.onrender.com/webhook'
+            });
+            console.log("🎉 Chatbot kreiran!", window.smartChatWidgetInstance);
+        } else {
+            console.log("ℹ️ Chatbot već postoji");
+        }
+    } else {
+        console.error("❌ Klasa SmartChatWidget nije definisana!");
     }
     
-    console.log("Inicijalizujem chatbot...");
-    window.smartChatWidgetInstance = new SmartChatWidget({
-        primaryColor: '#069806',
-        title: 'Vaša ZAPmoto podrška',
-        subtitle: 'Pitajte nas bilo šta o električnim skuterima',
-        position: 'bottom-right',
-        apiUrl: 'https://chatbot-backend-hcvx.onrender.com/webhook'
+    // Fallback: probaj ponovo kad se učita ceo dokument
+    window.addEventListener('load', function() {
+        if (!window.smartChatWidgetInstance && typeof SmartChatWidget !== 'undefined') {
+            console.log("🔄 Load event: pokušavam ponovo...");
+            window.smartChatWidgetInstance = new SmartChatWidget({
+                primaryColor: '#069806',
+                title: 'ZAPmoto podrška',
+                subtitle: 'Pitajte nas o električnim skuterima',
+                position: 'bottom-right',
+                apiUrl: 'https://chatbot-backend-hcvx.onrender.com/webhook'
+            });
+            console.log("🎉 Chatbot kreiran iz load eventa!");
+        }
     });
-}
-
-// Pokušaj odmah ako je dokument već učitan
-if (document.readyState === 'complete' || document.readyState === 'interactive') {
-    console.log("Dokument već spreman, pokrećem odmah");
-    setTimeout(initChatWidget, 100);
-} else {
-    console.log("Čekam DOMContentLoaded...");
-    document.addEventListener('DOMContentLoaded', initChatWidget);
-}
-
-window.addEventListener('load', function() {
-    console.log("Load event - pokrećem ako već nije pokrenuto");
-    initChatWidget();
-});
+})();

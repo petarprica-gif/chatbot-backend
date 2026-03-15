@@ -229,7 +229,22 @@ class ContextAwareChatbot:
         # Konvertujemo poruku u mala slova za sva poređenja
         message_lower = message.lower().strip()
         
-        # PROVERI NAJPRE DA LI POSTOJI U BAZI ZNANJA (koristimo mala slova)
+        # 1. PRVO PROVERI POZDRAVE (prioritet)
+        greetings = [
+            'dobro jutro', 'dobar dan', 'dobro veče', 'dobro vece',
+            'zdravo', 'ćao', 'cao', 'hej', 'pozdrav', 'pozz',
+            'halo', 'ej', 'dober dan', 'dober večer',
+            'good morning', 'good afternoon', 'good evening', 'hello', 'hi'
+        ]
+        
+        # Provera za pozdrave
+        for greeting in greetings:
+            # Proveri da li je ceo message pozdrav ili počinje sa pozdravom
+            if message_lower == greeting or message_lower.startswith(greeting + ' ') or message_lower.startswith(greeting + ','):
+                logger.info(f"✅ Prepoznat pozdrav: '{greeting}' u poruci '{message}'")
+                return Intent.GREETING
+        
+        # 2. TEK ONDA PROVERI BAZU ZNANJA
         try:
             relevant = self.retrieve_relevant_knowledge(message_lower, top_k=1)
             # Prag za prepoznavanje pitanja smanjen sa 0.6 na 0.3
@@ -239,22 +254,7 @@ class ContextAwareChatbot:
         except Exception as e:
             logger.error(f"Greška pri proveri baze znanja: {str(e)}")
         
-        # PROŠIRENA LISTA POZDRAVA - prvo proveravamo
-        greetings = [
-            'dobro jutro', 'dobar dan', 'dobro veče', 'dobro vece',
-            'zdravo', 'ćao', 'cao', 'hej', 'pozdrav', 'pozz',
-            'halo', 'ej', 'dober dan', 'dober večer',
-            'good morning', 'good afternoon', 'good evening', 'hello', 'hi'
-        ]
-        
-        # Provera za pozdrave (koristimo mala slova)
-        for greeting in greetings:
-            # Proveri da li je ceo message pozdrav ili počinje sa pozdravom
-            if message_lower == greeting or message_lower.startswith(greeting + ' ') or message_lower.startswith(greeting + ','):
-                logger.info(f"✅ Prepoznat pozdrav: '{greeting}' u poruci '{message}'")
-                return Intent.GREETING
-        
-        # Prvo proveri da li je u pitanju nastavak preporuke (kontekst)
+        # 3. Prvo proveri da li je u pitanju nastavak preporuke (kontekst)
         if conversation_history and len(conversation_history) > 0:
             last_assistant_msg = None
             for msg in reversed(conversation_history):
@@ -269,7 +269,7 @@ class ContextAwareChatbot:
                     logger.info("Prepoznato odbijanje preporuke, ostajem u PRODUCT_RECOMMENDATION modu")
                     return Intent.PRODUCT_RECOMMENDATION
         
-        # Pravimo prompt za OpenAI sa kontekstom
+        # 4. Pravimo prompt za OpenAI sa kontekstom (za ostale namere)
         system_prompt = """
         Ti si AI asistent za detekciju namere. Na osnovu korisničke poruke i istorije razgovora,
         odredi koja je od sledećih namera najverovatnija:
