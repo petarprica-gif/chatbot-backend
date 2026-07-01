@@ -10,6 +10,8 @@ from enum import Enum
 import logging
 import traceback
 from pathlib import Path
+import requests      # za WordPress API
+import bleach        # za čišćenje HTML-a
 
 logger = logging.getLogger(__name__)
 
@@ -51,14 +53,9 @@ class ContextAwareChatbot:
         
         # Ako putanja nije data, koristi apsolutnu putanju
         if knowledge_base_path is None:
-            # Uzmi putanju gde se nalazi ovaj fajl
             current_dir = Path(__file__).parent.absolute()
             knowledge_base_path = str(current_dir / "knowledge_base.json")
             logger.info(f"Koristim apsolutnu putanju: {knowledge_base_path}")
-        
-        # NEMA Redis-a!
-        # NEMA sentence-transformers!
-        # Samo OpenAI API
         
         # Učitavanje baze znanja
         self.knowledge_base = self.load_knowledge_base(knowledge_base_path)
@@ -68,6 +65,9 @@ class ContextAwareChatbot:
         
         # Aktivne konverzacije (čuvamo u RAM memoriji)
         self.active_conversations: Dict[str, ConversationMemory] = {}
+        
+        # ---------- AUTOMATSKO PREUZIMANJE SADRŽAJA SA SAJTA ----------
+        self.enrich_knowledge_base()
         
         logger.info(f"Chatbot inicijalizovan sa {len(self.knowledge_base)} stavki u bazi znanja")
     
@@ -81,31 +81,22 @@ class ContextAwareChatbot:
         Returns:
             Lista float vrednosti (embedding vektor)
         """
-        # Provera keša
         cache_key = f"emb_{hash(text)}"
         if cache_key in self.embedding_cache:
             return self.embedding_cache[cache_key]
         
         try:
-            # Poziv OpenAI API-ja za generisanje embeddinga
             response = openai.Embedding.create(
-                model="text-embedding-3-small",  # Mali, brz i jeftin model
+                model="text-embedding-3-small",
                 input=text,
                 encoding_format="float"
             )
-            
             embedding = response['data'][0]['embedding']
-            
-            # Čuvaj u kešu (ograniči veličinu keša)
             if len(self.embedding_cache) < 1000:
                 self.embedding_cache[cache_key] = embedding
-            
             return embedding
-            
         except Exception as e:
             logger.error(f"Greška pri generisanju embeddinga: {str(e)}")
-            logger.error(traceback.format_exc())
-            # Vrati prazan vektor kao fallback (dimenzija 1536 za text-embedding-3-small)
             return [0.0] * 1536
     
     def cosine_similarity(self, vec1: List[float], vec2: List[float]) -> float:
@@ -120,32 +111,22 @@ class ContextAwareChatbot:
         """
         vec1 = np.array(vec1)
         vec2 = np.array(vec2)
-        
-        # Izračunaj kosinusnu sličnost
         dot_product = np.dot(vec1, vec2)
         norm1 = np.linalg.norm(vec1)
         norm2 = np.linalg.norm(vec2)
-        
         if norm1 == 0 or norm2 == 0:
             return 0.0
-            
         return float(dot_product / (norm1 * norm2))
     
     def load_knowledge_base(self, path: str) -> List[Dict]:
         """
         Učitava bazu znanja iz JSON fajla
-        
-        Baza znanja može sadržati:
-        - FAQ parove
-        - Informacije o proizvodima
-        - Politike (return, shipping, itd.)
         """
         try:
             logger.info(f"Pokušavam da učitam bazu znanja sa putanje: {path}")
             with open(path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
             
-            # Za svaki unos, kreiraj tekst za embedding
             for item in data:
                 text_for_embedding = f"{item.get('question', '')} {item.get('answer', '')} {item.get('keywords', '')}"
                 item['text_for_embedding'] = text_for_embedding
@@ -159,56 +140,183 @@ class ContextAwareChatbot:
             logger.error(f"Greška pri učitavanju baze znanja: {str(e)}")
             return []
     
+    # ==================== NOVE METODE ZA AUTOMATSKO UČENJE ====================
+    def enrich_knowledge_base(self):
+        """
+        Povlači Vodič za kupovinu, članke bloga i proizvode sa WordPress/WooCommerce sajta
+        i dodaje ih u bazu (u memoriji). Ručno uneti podaci u JSON-u ostaju netaknuti.
+        """
+        base_url = "https://zapmoto.rs/wp-json/wp/v2"
+
+        # --- 1. Vodič za kupovinu (stranica) ---
+        try:
+            resp = requests.get(f"{base_url}/pages", params={"slug": "vodic-za-kupovinu"}, timeout=15)
+            if resp.status_code == 200 and resp.json():
+                page = resp.json()[0]
+                content = page.get('content', {}).get('rendered', '')
+                clean = bleach.clean(content, tags=[], attributes={}, strip=True)
+                entry = {
+                    "id": 300,
+                    "question": "Vodič za kupovinu električnog skutera",
+                    "answer": clean,
+                    "keywords": "vodič, kupovina, izbor, skuter, saveti, kako izabrati, domet, snaga",
+                    "category": "vodic",
+                    "source": "vodic"
+                }
+                entry['text_for_embedding'] = f"{entry['question']} {entry['answer']} {entry['keywords']}"
+                self.knowledge_base.append(entry)
+                logger.info("✅ Vodič dodat iz WordPress-a.")
+            else:
+                logger.warning("Stranica 'vodic-za-kupovinu' nije pronađena.")
+        except Exception as e:
+            logger.error(f"❌ Greška pri preuzimanju vodiča: {e}")
+
+        # --- 2. Članci bloga ---
+        try:
+            resp = requests.get(f"{base_url}/posts", params={"per_page": 50, "orderby": "date", "order": "desc"}, timeout=15)
+            if resp.status_code == 200:
+                posts = resp.json()
+                added = 0
+                for post in posts:
+                    if post.get('status') != 'publish':
+                        continue
+                    title = post.get('title', {}).get('rendered', '')
+                    content = post.get('content', {}).get('rendered', '')
+                    clean = bleach.clean(content, tags=[], attributes={}, strip=True)
+                    entry = {
+                        "id": 301 + added,
+                        "question": title,
+                        "answer": clean,
+                        "keywords": "",
+                        "category": "blog",
+                        "source": "blog"
+                    }
+                    entry['text_for_embedding'] = f"{title} {clean}"
+                    self.knowledge_base.append(entry)
+                    added += 1
+                logger.info(f"✅ Dodato {added} članaka bloga.")
+            else:
+                logger.error(f"WordPress API za članke nije dostupan (status {resp.status_code})")
+        except Exception as e:
+            logger.error(f"❌ Greška pri preuzimanju članaka: {e}")
+
+        # --- 3. Proizvodi ---
+        self._fetch_products_from_wp(base_url)
+        self._fetch_products_from_woocommerce()
+
+    def _fetch_products_from_wp(self, base_url: str):
+        """Pokušaj da dohvati proizvode preko javnog WP REST API-ja (custom post type 'product')"""
+        try:
+            for endpoint in ["/product", "/products"]:
+                try:
+                    resp = requests.get(f"{base_url}{endpoint}", params={"per_page": 100}, timeout=15)
+                    if resp.status_code == 200:
+                        products = resp.json()
+                        if not products:
+                            continue
+                        added = 0
+                        start_id = 1000
+                        for prod in products:
+                            if prod.get('status') != 'publish':
+                                continue
+                            title = prod.get('title', {}).get('rendered', '')
+                            content = prod.get('content', {}).get('rendered', '')
+                            clean = bleach.clean(content, tags=[], attributes={}, strip=True)
+
+                            # Pokušaj da odrediš kategoriju (možeš doraditi)
+                            category = "skuteri"  # podrazumevano
+                            cats = prod.get('categories', [])
+                            for cat_id in cats:
+                                # Ako znaš ID kategorija, ovde možeš mapirati
+                                pass
+
+                            question = f"Koje su karakteristike {title}?"
+                            entry = {
+                                "id": start_id + added,
+                                "question": question,
+                                "answer": clean,
+                                "keywords": title.lower(),
+                                "category": category,
+                                "source": "proizvodi"
+                            }
+                            entry['text_for_embedding'] = f"{question} {clean} {title.lower()}"
+                            self.knowledge_base.append(entry)
+                            added += 1
+                        logger.info(f"✅ Automatski dodato {added} proizvoda sa WP endpointa {endpoint}.")
+                        return
+                except Exception:
+                    continue
+            logger.warning("Nijedan javni WP endpoint za proizvode nije radio.")
+        except Exception as e:
+            logger.error(f"❌ Greška pri automatskom preuzimanju proizvoda (WP): {e}")
+
+    def _fetch_products_from_woocommerce(self):
+        """Ako postoji WooCommerce API ključ u ENV, koristi ga za proizvode."""
+        consumer_key = os.getenv('WOOCOMMERCE_CONSUMER_KEY')
+        consumer_secret = os.getenv('WOOCOMMERCE_CONSUMER_SECRET')
+        if not consumer_key or not consumer_secret:
+            logger.info("WooCommerce API ključevi nisu podešeni – preskačem.")
+            return
+
+        try:
+            url = "https://zapmoto.rs/wp-json/wc/v3/products"
+            params = {"per_page": 100, "consumer_key": consumer_key, "consumer_secret": consumer_secret}
+            resp = requests.get(url, params=params, timeout=15)
+            if resp.status_code == 200:
+                products = resp.json()
+                added = 0
+                start_id = 2000
+                for prod in products:
+                    if prod.get('status') != 'publish':
+                        continue
+                    name = prod.get('name', '')
+                    description = prod.get('description', '')
+                    clean_desc = bleach.clean(description, tags=[], attributes={}, strip=True)
+                    cats = [c['name'].lower() for c in prod.get('categories', [])]
+                    category = "skuteri" if any('skuter' in c for c in cats) else "motocikli"
+                    question = f"Koje su karakteristike {name}?"
+                    entry = {
+                        "id": start_id + added,
+                        "question": question,
+                        "answer": clean_desc,
+                        "keywords": name.lower(),
+                        "category": category,
+                        "source": "proizvodi"
+                    }
+                    entry['text_for_embedding'] = f"{question} {clean_desc} {name.lower()}"
+                    self.knowledge_base.append(entry)
+                    added += 1
+                logger.info(f"✅ Automatski dodato {added} proizvoda sa WooCommerce API-ja.")
+            else:
+                logger.error(f"WooCommerce API greška: {resp.status_code}")
+        except Exception as e:
+            logger.error(f"❌ Greška pri preuzimanju proizvoda preko WooCommerce API-ja: {e}")
+
+    # ==================== ORIGINALNE METODE (ne menjati) ====================
     def retrieve_relevant_knowledge(self, query: str, top_k: int = 5) -> List[Dict]:
-        """
-        Pronalazi najrelevantnije informacije iz baze znanja za korisnički upit
-        
-        Koristi OpenAI embeddige za semantičko pretraživanje
-        
-        Args:
-            query: Korisnički upit
-            top_k: Broj najrelevantnijih rezultata (povećano sa 3 na 5)
-        
-        Returns:
-            Lista relevantnih informacija iz baze znanja
-        """
         if not self.knowledge_base:
             logger.warning("Baza znanja je prazna, ne mogu da pretražujem")
             return []
-        
         try:
-            # Generiši embedding za upit
             query_embedding = self.get_embedding(query)
-            
-            # Izračunaj sličnosti
             similarities = []
             for idx, item in enumerate(self.knowledge_base):
-                # Generiši embedding za stavku ako već nije u kešu
                 item_text = item.get('text_for_embedding', '')
                 item_key = f"kb_{idx}"
-                
                 if item_key not in self.embedding_cache:
                     self.embedding_cache[item_key] = self.get_embedding(item_text)
-                
                 item_embedding = self.embedding_cache[item_key]
-                
-                # Izračunaj sličnost
                 similarity = self.cosine_similarity(query_embedding, item_embedding)
                 similarities.append((similarity, idx, item))
-            
-            # Sortiraj po sličnosti (opadajuće) i uzmi top_k
             similarities.sort(reverse=True, key=lambda x: x[0])
-            
             relevant_items = []
             for i in range(min(top_k, len(similarities))):
-                # Prag za prihvatanje relevantnih stavki smanjen sa 0.3 na 0.25
-                if similarities[i][0] > 0.25:  # PRAG SMANJEN: 0.3 -> 0.25
+                if similarities[i][0] > 0.25:
                     relevant_items.append({
                         'content': similarities[i][2],
                         'relevance_score': float(similarities[i][0]),
                         'source': similarities[i][2].get('source', 'knowledge_base')
                     })
-            
             logger.info(f"Pronađeno {len(relevant_items)} relevantnih stavki, najbolji score: {similarities[0][0] if similarities else 0}")
             return relevant_items
         except Exception as e:
@@ -216,60 +324,35 @@ class ContextAwareChatbot:
             return []
     
     def detect_intent(self, message: str, conversation_history: List[Dict]) -> Intent:
-        """
-        Detektuje nameru korisnika koristeći OpenAI
-        
-        Args:
-            message: Trenutna poruka
-            conversation_history: Istorija razgovora za kontekst
-        
-        Returns:
-            Detektovana namera
-        """
-        # Konvertujemo poruku u mala slova za sva poređenja
         message_lower = message.lower().strip()
-        
-        # 1. PRVO PROVERI POZDRAVE (prioritet)
         greetings = [
             'dobro jutro', 'dobar dan', 'dobro veče', 'dobro vece',
             'zdravo', 'ćao', 'cao', 'hej', 'pozdrav', 'pozz',
             'halo', 'ej', 'dober dan', 'dober večer',
             'good morning', 'good afternoon', 'good evening', 'hello', 'hi'
         ]
-        
-        # Provera za pozdrave
         for greeting in greetings:
-            # Proveri da li je ceo message pozdrav ili počinje sa pozdravom
             if message_lower == greeting or message_lower.startswith(greeting + ' ') or message_lower.startswith(greeting + ','):
                 logger.info(f"✅ Prepoznat pozdrav: '{greeting}' u poruci '{message}'")
                 return Intent.GREETING
-        
-        # 2. TEK ONDA PROVERI BAZU ZNANJA
         try:
             relevant = self.retrieve_relevant_knowledge(message_lower, top_k=1)
-            # Prag za prepoznavanje pitanja smanjen sa 0.6 na 0.3
-            if relevant and relevant[0].get('relevance_score', 0) > 0.3:  # PRAG SMANJEN: 0.6 -> 0.3
+            if relevant and relevant[0].get('relevance_score', 0) > 0.3:
                 logger.info(f"✅ Prepoznato kao pitanje iz baze znanja (score: {relevant[0]['relevance_score']})")
                 return Intent.PRODUCT_QUESTION
         except Exception as e:
             logger.error(f"Greška pri proveri baze znanja: {str(e)}")
-        
-        # 3. Prvo proveri da li je u pitanju nastavak preporuke (kontekst)
         if conversation_history and len(conversation_history) > 0:
             last_assistant_msg = None
             for msg in reversed(conversation_history):
                 if msg['role'] == 'assistant':
                     last_assistant_msg = msg
                     break
-            
-            # Ako je poslednja poruka bila preporuka, a korisnik odbija
             if last_assistant_msg and last_assistant_msg.get('intent') == 'product_recommendation':
                 rejection_keywords = ['ne sviđa', 'drugi', 'neki drugi', 'drugačiji', 'neću', 'ne želim', 'nemoj']
                 if any(keyword in message_lower for keyword in rejection_keywords):
                     logger.info("Prepoznato odbijanje preporuke, ostajem u PRODUCT_RECOMMENDATION modu")
                     return Intent.PRODUCT_RECOMMENDATION
-        
-        # 4. Pravimo prompt za OpenAI sa kontekstom (za ostale namere)
         system_prompt = """
         Ti si AI asistent za detekciju namere. Na osnovu korisničke poruke i istorije razgovora,
         odredi koja je od sledećih namera najverovatnija:
@@ -285,11 +368,8 @@ class ContextAwareChatbot:
         
         Vrati samo naziv namere, ništa drugo.
         """
-        
-        # Pripremi kontekst iz istorije
         recent_history = conversation_history[-5:] if conversation_history else []
         history_text = "\n".join([f"{msg['role']}: {msg['content']}" for msg in recent_history])
-        
         try:
             response = openai.ChatCompletion.create(
                 model="gpt-3.5-turbo",
@@ -300,24 +380,16 @@ class ContextAwareChatbot:
                 max_tokens=10,
                 temperature=0.3
             )
-            
             intent_str = response.choices[0].message.content.strip().lower()
-            
-            # Mapiramo string u enum
             for intent in Intent:
                 if intent.value == intent_str:
                     return intent
-            
             return Intent.UNKNOWN
         except Exception as e:
             logger.error(f"Greška pri detekciji namere: {str(e)}")
             return Intent.UNKNOWN
     
     def generate_greeting_response(self, message: str, user_id: str, conversation_id: str = None, channel: str = "web") -> Dict[str, Any]:
-        """
-        Generiše odgovor na pozdrav.
-        """
-        # Mapa pozdrava i odgovora
         greeting_responses = {
             'dobro jutro': 'Dobro jutro! Kako vam mogu pomoći danas?',
             'dobar dan': 'Dobar dan! Drago mi je da ste tu. Kako vam mogu pomoći?',
@@ -334,24 +406,19 @@ class ContextAwareChatbot:
             'hello': 'Hello! How can I help you?',
             'hi': 'Hi! How can I help you?'
         }
-        
         message_lower = message.lower()
-        response_text = "Zdravo! Kako vam mogu pomoći?"  # Default odgovor
-        
-        # Pronađi odgovarajući odgovor
+        response_text = "Zdravo! Kako vam mogu pomoći?"
         for greeting, response in greeting_responses.items():
             if greeting in message_lower:
                 response_text = response
                 break
-        
-        # Sačuvaj poruke u memoriju
+
         memory_key = f"{user_id}:{conversation_id}" if conversation_id else user_id
         self.add_to_conversation(memory_key, {
             'role': 'user',
             'content': message,
             'timestamp': datetime.now().isoformat()
         })
-        
         self.add_to_conversation(memory_key, {
             'role': 'assistant',
             'content': response_text,
@@ -359,7 +426,6 @@ class ContextAwareChatbot:
             'intent': 'greeting',
             'knowledge_used': []
         })
-        
         return {
             'response': response_text,
             'intent': 'greeting',
@@ -370,18 +436,7 @@ class ContextAwareChatbot:
         }
     
     def extract_criteria_from_message(self, message: str) -> Dict[str, any]:
-        """
-        Koristi OpenAI da iz poruke izdvoji kriterijume za preporuku.
-        
-        Args:
-            message: Korisnička poruka
-        
-        Returns:
-            Rečnik sa kriterijumima
-        """
         logger.info(f"===== extract_criteria_from_message POZVAN =====")
-        logger.info(f"Poruka: {message}")
-        
         criteria_prompt = f"""
         Na osnovu korisničkog pitanja: "{message}"
         Izdvoj kriterijume za preporuku električnog skutera/motocikla.
@@ -397,9 +452,7 @@ class ContextAwareChatbot:
         Ako neki kriterijum nije pomenut, vrati null.
         Vrati SAMO JSON, ništa drugo.
         """
-        
         try:
-            logger.info("Šaljem zahtev ka OpenAI...")
             response = openai.ChatCompletion.create(
                 model="gpt-3.5-turbo",
                 messages=[
@@ -409,115 +462,62 @@ class ContextAwareChatbot:
                 max_tokens=200,
                 temperature=0.3
             )
-            
             criteria_text = response.choices[0].message.content.strip()
-            logger.info(f"Odgovor od OpenAI-ja: {criteria_text}")
-            
-            # Očisti JSON ako ima markdowna
             if criteria_text.startswith('```json'):
                 criteria_text = criteria_text.replace('```json', '').replace('```', '')
             elif criteria_text.startswith('```'):
                 criteria_text = criteria_text.replace('```', '')
-            
             criteria_text = criteria_text.strip()
-            logger.info(f"Očišćen JSON string: {criteria_text}")
-            
-            # Pokušaj da parsiraš JSON
-            try:
-                criteria = json.loads(criteria_text)
-                logger.info(f"Parsirani kriterijumi: {criteria}")
-            except json.JSONDecodeError as e:
-                logger.error(f"❌ Neispravan JSON od OpenAI-ja: {criteria_text}")
-                logger.error(f"Greška pri parsiranju: {str(e)}")
-                criteria = {}
-            
-            # Osiguraj da svi očekivani ključevi postoje
-            expected_keys = ['kategorija', 'min_domet', 'max_domet', 'max_snaga', 'kategorija_vozacke', 'prenosna_baterija']
-            for key in expected_keys:
-                if key not in criteria:
-                    criteria[key] = None
-                    logger.info(f"Dodajem nedostajući ključ: {key} = None")
-            
-            logger.info(f"Konačni kriterijumi: {criteria}")
-            return criteria
-            
+            criteria = json.loads(criteria_text)
         except Exception as e:
-            logger.error(f"❌ Greška u extract_criteria_from_message: {str(e)}")
-            logger.error(traceback.format_exc())
-            return {}
+            logger.error(f"❌ Neispravan JSON od OpenAI-ja: {criteria_text if 'criteria_text' in locals() else ''} - {e}")
+            criteria = {}
+        expected_keys = ['kategorija', 'min_domet', 'max_domet', 'max_snaga', 'kategorija_vozacke', 'prenosna_baterija']
+        for key in expected_keys:
+            if key not in criteria:
+                criteria[key] = None
+        return criteria
     
     def filter_models_by_criteria(self, criteria: Dict[str, any], message: str = "") -> List[Dict]:
-        """
-        Filtrira modele iz baze znanja na osnovu zadatih kriterijuma.
-        
-        Args:
-            criteria: Rečnik sa kriterijumima
-            message: Originalna poruka (za dodatne provere)
-        
-        Returns:
-            Lista modela koji ispunjavaju kriterijume
-        """
         logger.info(f"===== filter_models_by_criteria POZVAN =====")
-        logger.info(f"Primljeni kriterijumi: {criteria}")
-        logger.info(f"Poruka: {message}")
-        logger.info(f"Ukupno modela u bazi: {len(self.knowledge_base)}")
-        
         filtered_models = []
-        
         for idx, item in enumerate(self.knowledge_base):
             model_name = item.get('question', 'nepoznato')
-            logger.info(f"--- Proveravam model: {model_name} ---")
-            
-            # Proveri da li je unos proizvod
             if item.get('source') != 'proizvodi':
-                logger.info(f"❌ Nije proizvod (source={item.get('source')}), preskačem")
                 continue
             
-            # Provera kategorije
             if 'kategorija' in criteria and criteria['kategorija']:
                 if item.get('category') != criteria['kategorija']:
-                    logger.info(f"❌ Kategorija se ne poklapa, preskačem")
                     continue
-                else:
-                    logger.info(f"✅ Kategorija se poklapa")
             
             answer = item.get('answer', '').lower()
             
-            # POSEBNO ZA AM KATEGORIJU I GRADSKU VOŽNJU
             if 'kategorija_vozacke' in criteria and criteria['kategorija_vozacke'] == 'AM':
                 if 'grad' in message.lower() or 'gradsku' in message.lower() or 'gradska' in message.lower():
                     if item.get('category') == 'skuteri':
-                        logger.info(f"✅ Skuter prihvaćen za gradsku vožnju")
                         filtered_models.append(item)
                         continue
             
-            # Provera kategorije vozačke dozvole
             if 'kategorija_vozacke' in criteria and criteria['kategorija_vozacke']:
                 vozacka = criteria['kategorija_vozacke'].lower()
-                
                 if vozacka == 'am':
                     if item.get('category') != 'skuteri':
                         continue
                 elif vozacka == 'a1' and 'a1 kategorija' not in answer:
                     continue
             
-            # Provera dometa
             domet_match = re.search(r'domet do (\d+) km', answer)
             if domet_match:
                 domet = int(domet_match.group(1))
-                
                 domet_passed = True
-                
                 if 'min_domet' in criteria and criteria['min_domet']:
                     min_allowed = criteria['min_domet'] * 0.8
                     if domet < min_allowed:
                         domet_passed = False
-                
                 if domet_passed and 'max_domet' in criteria and criteria['max_domet']:
                     max_allowed = criteria['max_domet'] * 1.2
                     if domet > max_allowed:
                         domet_passed = False
-                
                 if not domet_passed:
                     continue
             else:
@@ -525,123 +525,65 @@ class ContextAwareChatbot:
                     continue
             
             filtered_models.append(item)
-            logger.info(f"✅✅✅ MODEL PRIHVAĆEN: {model_name}")
-        
         logger.info(f"===== FILTER ZAVRŠEN: PRONAĐENO {len(filtered_models)} MODEL =====")
-        logger.info(f"Prihvaćeni modeli: {[m.get('question', 'nepoznato') for m in filtered_models]}")
         return filtered_models
     
     def extract_brand_from_query(self, query: str) -> str:
-        """
-        Izvlači naziv brenda iz upita (Pusa, Lipo, Deer, E2Go, Puma, Tiger, Lion)
-        
-        Args:
-            query: Korisnički upit
-            
-        Returns:
-            Naziv brenda u malim slovima ili prazan string
-        """
         query_lower = query.lower()
         brands = ['pusa', 'lipo', 'deer', 'e2go', 'puma', 'tiger', 'lion']
-        
         for brand in brands:
             if brand in query_lower:
                 return brand
         return ""
     
     def format_product_response(self, relevant_items: List[Dict], original_query: str = "") -> str:
-        """
-        Formatiram odgovor sa svim relevantnim proizvodima.
-        Svaki proizvod je u novom redu sa jasno odvojenim karakteristikama.
-        Filtrira po brendu ako je prepoznat u upitu.
-        Ako postoji kontakt informacija, prioritetno je prikazuje.
-        
-        Args:
-            relevant_items: Lista relevantnih proizvoda iz baze znanja
-            original_query: Originalno korisničko pitanje
-        
-        Returns:
-            Formatiran string sa svim proizvodima
-        """
         if not relevant_items:
             return ""
-        
-        # Prvo proveri da li postoji kontakt informacija
         kontakt_items = [item for item in relevant_items if item['content'].get('category') == 'kontakt']
-        
-        # Ako postoji kontakt i pitanje je o kontaktu, prikaži samo kontakt
         if kontakt_items and any(word in original_query.lower() for word in ['kontakt', 'telefon', 'email', 'pozov', 'javite']):
             relevant_items = kontakt_items
         else:
-            # Inače, izvuci brend iz upita i filtriraj
             brand = self.extract_brand_from_query(original_query)
-            
             if brand:
                 filtered_items = []
                 for item in relevant_items:
                     question_lower = item['content'].get('question', '').lower()
-                    # Proveri da li pitanje sadrži naziv brenda
                     if brand in question_lower:
                         filtered_items.append(item)
-                
-                # Ako ima filtriranih, koristi njih, inače ostavi sve
                 if filtered_items:
                     relevant_items = filtered_items
         
         response_parts = ["Na osnovu vašeg pitanja, evo relevantnih informacija:"]
-        
         for idx, item in enumerate(relevant_items, 1):
             content = item['content']
             question = content.get('question', '')
             answer = content.get('answer', '')
-            
-            # Izvuci naziv modela iz pitanja
             model_name = question.replace("Koje su karakteristike ", "").replace("?", "").strip()
-            
-            # Dodaj model kao poseban naslov sa HTML prelazima
             response_parts.append(f"<br><br>{idx}. <strong>{model_name}</strong><br>")
-            
-            # Podeli odgovor na karakteristike
-            # Odstrani HTML linkove za pregledniji prikaz, ali sačuvaj linkove
             clean_answer = answer.replace('<a href="', '<a target="_blank" href="')
-            
-            # Dodaj svaku karakteristiku u novi red
             response_parts.append(f"&nbsp;&nbsp;&nbsp;- {clean_answer}<br>")
-            
-            # Ako postoji cena u bazi, dodaj je posebno
             if 'cena' in content:
                 response_parts.append(f"&nbsp;&nbsp;&nbsp;- <strong>Cena:</strong> {content['cena']}<br>")
-        
         return "".join(response_parts)
     
     def offer_contact_options(self, message: str, user_id: str, conversation_id: str = None, channel: str = "web") -> Dict[str, Any]:
-        """
-        Nudi korisniku opcije za kontakt sa originalnim ikonama aplikacija.
-        """
         phone = "+381603534000"
-        
         whatsapp_link = f"https://wa.me/{phone}"
         viber_link = f"viber://chat?number={phone}"
         sms_link = f"sms:{phone}"
-        
-        # WhatsApp SVG ikona
         whatsapp_svg = '''
         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="vertical-align: middle; margin-right: 8px;">
             <path d="M19.077 4.928C17.191 3.041 14.683 2 12.006 2 6.798 2 2.548 6.193 2.54 11.393c-.003 1.747.456 3.457 1.328 4.984L2.25 21.75l5.428-1.573c1.472.839 3.137 1.286 4.857 1.288h.004c5.192 0 9.457-4.193 9.465-9.393.004-2.51-.972-4.872-2.857-6.758l-.07-.069zM12.03 20.026h-.003c-1.5-.001-2.97-.405-4.248-1.166l-.305-.182-3.222.934.86-3.144-.189-.312a7.925 7.925 0 0 1-1.222-4.222c.006-4.385 3.576-7.96 7.976-7.96 2.13 0 4.13.83 5.636 2.34 1.506 1.509 2.334 3.514 2.33 5.636-.005 4.386-3.576 7.961-7.973 7.961l-.04-.005z" fill="#25D366"/>
             <path d="M16.11 13.454c-.266-.133-1.574-.774-1.818-.863-.244-.089-.422-.133-.599.133-.177.267-.688.863-.843 1.04-.155.178-.31.2-.577.067-.886-.333-1.682-.883-2.256-1.596-.178-.2-.322-.417-.454-.642.056-.033.11-.067.16-.106.088-.066.176-.133.26-.207.295-.257.534-.565.698-.911.027-.056.043-.118.048-.18.005-.063-.008-.127-.036-.185l-.424-.994c-.1-.233-.312-.39-.56-.413-.09-.008-.18-.003-.268.012-.15.021-.294.075-.418.156-.021.014-.041.029-.06.046-.359.316-.653.698-.863 1.127-.015.033-.026.067-.033.102-.094.378-.084.776.029 1.148.331 1.072.92 2.053 1.722 2.862.064.064.13.126.197.187.228.207.469.4.721.578.313.22.645.411.991.571.145.068.293.129.444.184.399.144.812.25 1.232.316.122.02.246.03.369.032.175.003.347-.021.512-.07.18-.048.341-.144.466-.277.192-.197.336-.436.422-.699.043-.133.055-.272.034-.408-.018-.12-.064-.234-.132-.334-.082-.117-.425-.716-.544-.878-.076-.1-.166-.132-.245-.132-.06 0-.12.016-.218.068-.275.146-.483.238-.609.289-.106.043-.187.066-.278-.022-.177-.177-.416-.407-.553-.549-.162-.17-.276-.381-.333-.61.09-.062.235-.15.358-.218.168-.093.31-.195.399-.282.181-.178.275-.409.293-.656.008-.092-.007-.184-.042-.27-.028-.07-.1-.222-.136-.298l-.232-.487c-.04-.084-.078-.168-.115-.253-.025-.058-.065-.11-.116-.148z" fill="#25D366"/>
         </svg>
         '''
-        
-        # Viber SVG ikona
         viber_svg = '''
         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="vertical-align: middle; margin-right: 8px;">
             <path d="M11.995 2C7.58 2 4 5.58 4 9.995c0 1.732.58 3.415 1.584 4.812L4.5 19.5l4.774-1.125c1.34.82 2.881 1.267 4.53 1.267 4.415 0 8-3.58 8-7.995C21.804 5.58 18.41 2 13.995 2h-2z" fill="#7360F2"/>
             <path d="M15.5 13.4c-.3.3-.7.4-1.1.2-.9-.3-2.3-1.1-3.3-2.2-.9-.9-1.6-1.9-1.9-2.8-.1-.4 0-.8.2-1.1l.5-.5c.3-.3.3-.8 0-1.1l-1.1-1.1c-.3-.3-.8-.3-1.1 0l-.5.5c-.6.6-.8 1.5-.5 2.3.5 1.3 1.5 2.8 2.9 4.2 1.4 1.4 2.9 2.3 4.2 2.9.8.3 1.7.1 2.3-.5l.5-.5c.3-.3.3-.8 0-1.1l-1.1-1.1c-.3-.3-.8-.3-1.1 0l-.5.5z" fill="#FFFFFF"/>
         </svg>
         '''
-        
         sms_icon = '<span style="font-size: 24px; vertical-align: middle; margin-right: 8px;">✉️</span>'
-        
         contact_message = f"""
 Nažalost, nemam odgovor na ovo pitanje.
 
@@ -673,22 +615,9 @@ Naš tim će vam rado pomoći u najkraćem mogućem roku.
 
 Da li mogu da vam pomognem oko nečeg drugog?
 """
-        
         memory_key = f"{user_id}:{conversation_id}" if conversation_id else user_id
-        self.add_to_conversation(memory_key, {
-            'role': 'user',
-            'content': message,
-            'timestamp': datetime.now().isoformat()
-        })
-        
-        self.add_to_conversation(memory_key, {
-            'role': 'assistant',
-            'content': contact_message,
-            'timestamp': datetime.now().isoformat(),
-            'intent': 'contact_offered',
-            'knowledge_used': []
-        })
-        
+        self.add_to_conversation(memory_key, {'role': 'user', 'content': message, 'timestamp': datetime.now().isoformat()})
+        self.add_to_conversation(memory_key, {'role': 'assistant', 'content': contact_message, 'timestamp': datetime.now().isoformat(), 'intent': 'contact_offered', 'knowledge_used': []})
         return {
             'response': contact_message,
             'intent': 'contact_offered',
@@ -699,80 +628,49 @@ Da li mogu da vam pomognem oko nečeg drugog?
         }
     
     def generate_recommendation_response(self, message: str, criteria: Dict[str, any], conversation_history: List[Dict]) -> tuple:
-        """
-        Generiše odgovor sa preporukama na osnovu kriterijuma.
-        """
         logger.info(f"===== generate_recommendation_response POZVAN =====")
-        logger.info(f"Kriterijumi: {criteria}")
-        logger.info(f"Dužina istorije: {len(conversation_history)}")
-        logger.info(f"Poruka: {message}")
-        
-        # Prošireno pamćenje prethodnih preporuka
         previous_models = []
         if conversation_history:
             for msg in reversed(conversation_history[-10:]):
                 if msg.get('intent') == 'product_recommendation' and 'recommended_models' in msg:
                     previous_models.extend(msg.get('recommended_models', []))
             previous_models = list(set(previous_models))
-            logger.info(f"Sve prethodne preporuke: {previous_models}")
-        
-        # Filtriraj modele
         matching_models = self.filter_models_by_criteria(criteria, message)
-        
-        # Izbaci prethodno preporučene
         if previous_models and matching_models:
             before_count = len(matching_models)
             matching_models = [m for m in matching_models if m.get('id') not in previous_models]
-            logger.info(f"Nakon izbacivanja prethodnih: {before_count} -> {len(matching_models)} modela")
-        
-        # Sortiranje modela po dometu
         def get_domet(model):
             answer = model.get('answer', '')
             domet_match = re.search(r'domet do (\d+) km', answer)
             return int(domet_match.group(1)) if domet_match else 0
-        
         matching_models.sort(key=get_domet, reverse=True)
-        
         if not matching_models:
             if previous_models:
                 return "Razumem. Nažalost, trenutno nemamo druge modele koji odgovaraju tvojim kriterijumima.", []
             else:
                 return "Nažalost, trenutno nemamo modele koji odgovaraju tvojim kriterijumima.", []
-        
-        # Generiši HTML odgovor sa klikabilnim linkovima
         response_parts = ["Na osnovu tvojih kriterijuma, preporučujem sledeće modele:\n\n"]
-        
         recommended_ids = []
         for i, model in enumerate(matching_models[:5], 1):
             model_id = model.get('id')
             if model_id:
                 recommended_ids.append(model_id)
-            
             question = model.get('question', '')
             model_name = question.replace("Koje su karakteristike ", "").replace("?", "").strip()
             answer = model.get('answer', '')
-            
             domet_match = re.search(r'domet do (\d+) km', answer)
             domet = domet_match.group(1) if domet_match else "nepoznat"
-            
             snaga_match = re.search(r'snagu ([\d\.]+) kw', answer.lower())
             if not snaga_match:
                 snaga_match = re.search(r'(\d+(?:\.\d+)?)\s*kw', answer.lower())
             snaga = snaga_match.group(1) if snaga_match else "?"
-            
             vozacka = "AM" if "am kategorija" in answer.lower() else "A1" if "a1 kategorija" in answer.lower() else "?"
-            
             link_match = re.search(r"https?://[^\s']+", answer)
             link = link_match.group(0) if link_match else "#"
-            
             item = f"{i}. <a href='{link}' target='_blank' style='color: #069806; text-decoration: underline; font-weight: bold;'>{model_name}</a> - Snaga: {snaga} kW, Domet: {domet} km, Kategorija: {vozacka}\n\n"
             response_parts.append(item)
-        
         response_parts.append("Ako želiš više informacija o nekom modelu, slobodno pitaj! Ako ti se neki od ovih modela ne sviđa, reci mi pa ću probati da nađem drugačije opcije.")
-        
         response_text = "".join(response_parts)
-        
-        logger.info(f"Generisano {len(recommended_ids)} preporuka: {recommended_ids}")
         return response_text, recommended_ids
     
     def generate_response(self, 
@@ -780,52 +678,21 @@ Da li mogu da vam pomognem oko nečeg drugog?
                          user_id: str, 
                          conversation_id: str = None,
                          channel: str = "web") -> Dict[str, Any]:
-        """
-        Generiše odgovor na korisničku poruku sa kontekstualnom svešću
-        """
-        
         try:
             logger.info(f"===== GENERATE_RESPONSE POZVAN =====")
-            logger.info(f"Poruka: {message}")
-            logger.info(f"User ID: {user_id}")
-            logger.info(f"Conversation ID: {conversation_id}")
-            logger.info(f"Channel: {channel}")
-            
             memory_key = f"{user_id}:{conversation_id}" if conversation_id else user_id
             conversation = self.get_or_create_conversation(memory_key, user_id, channel)
-            
             intent = self.detect_intent(message, conversation.messages)
-            logger.info(f"Detektovana namera: {intent}")
-            
             if intent == Intent.GREETING:
-                logger.info("Obrada pozdrava...")
                 return self.generate_greeting_response(message, user_id, conversation_id, channel)
-            
             if self.should_escalate(message, intent, conversation):
-                logger.info("Potrebna eskalacija ka agentu")
                 conversation.escalation_needed = True
                 return self.prepare_escalation(message, conversation)
-            
             if intent == Intent.PRODUCT_RECOMMENDATION:
-                logger.info("Obrada preporuka...")
                 criteria = self.extract_criteria_from_message(message)
                 response_text, recommended_ids = self.generate_recommendation_response(message, criteria, conversation.messages)
-                
-                self.add_to_conversation(memory_key, {
-                    'role': 'user',
-                    'content': message,
-                    'timestamp': datetime.now().isoformat()
-                })
-                
-                self.add_to_conversation(memory_key, {
-                    'role': 'assistant',
-                    'content': response_text,
-                    'timestamp': datetime.now().isoformat(),
-                    'intent': intent.value,
-                    'recommended_models': recommended_ids,
-                    'knowledge_used': []
-                })
-                
+                self.add_to_conversation(memory_key, {'role': 'user', 'content': message, 'timestamp': datetime.now().isoformat()})
+                self.add_to_conversation(memory_key, {'role': 'assistant', 'content': response_text, 'timestamp': datetime.now().isoformat(), 'intent': intent.value, 'recommended_models': recommended_ids, 'knowledge_used': []})
                 return {
                     'response': response_text,
                     'intent': intent.value,
@@ -837,39 +704,36 @@ Da li mogu da vam pomognem oko nečeg drugog?
             
             logger.info("Standardna obrada pitanja...")
             relevant_knowledge = self.retrieve_relevant_knowledge(message)
-            
             has_good_answer = False
             best_score = 0
             if relevant_knowledge:
                 best_score = relevant_knowledge[0].get('relevance_score', 0)
-                # Prag za davanje odgovora smanjen sa 0.30 na 0.29
-                if best_score > 0.29:  # PRAG SMANJEN: 0.30 -> 0.29
+                if best_score > 0.29:
                     has_good_answer = True
-            
             if not has_good_answer:
                 logger.info(f"Nema dovoljno relevantnog odgovora (najbolji score: {best_score:.2f})")
-                # SADA ODMAH NUDI KONTAKT OPCIJE, NE KORISTI AI
                 return self.offer_contact_options(message, user_id, conversation_id, channel)
             
-            # KORISTI NOVU FUNKCIJU ZA FORMATIRANJE SVIH RELEVANTNIH PROIZVODA
-            # Prosleđujemo i originalno pitanje za filtriranje po brendu
-            response_text = self.format_product_response(relevant_knowledge, message)
+            # ---------- IZMENA: Razlikovanje proizvoda od vodiča/bloga ----------
+            top_item = relevant_knowledge[0]['content']
+            if top_item.get('source') in ['vodic', 'blog']:
+                knowledge_text = ""
+                for item in relevant_knowledge[:3]:
+                    content = item['content']
+                    knowledge_text += f"Naslov: {content.get('question', '')}\nSadržaj: {content.get('answer', '')}\n\n"
+                context = {
+                    'relevant_knowledge': relevant_knowledge,
+                    'conversation_history': conversation.messages[-6:],
+                    'intent': intent.value,
+                    'channel': channel
+                }
+                response_text = self.generate_llm_response(message, context)
+            else:
+                response_text = self.format_product_response(relevant_knowledge, message)
             
-            self.add_to_conversation(memory_key, {
-                'role': 'user',
-                'content': message,
-                'timestamp': datetime.now().isoformat()
-            })
-            
-            self.add_to_conversation(memory_key, {
-                'role': 'assistant',
-                'content': response_text,
-                'timestamp': datetime.now().isoformat(),
-                'intent': intent.value,
-                'knowledge_used': [k['source'] for k in relevant_knowledge] if relevant_knowledge else []
-            })
-            
-            response = {
+            self.add_to_conversation(memory_key, {'role': 'user', 'content': message, 'timestamp': datetime.now().isoformat()})
+            self.add_to_conversation(memory_key, {'role': 'assistant', 'content': response_text, 'timestamp': datetime.now().isoformat(), 'intent': intent.value, 'knowledge_used': [k['source'] for k in relevant_knowledge] if relevant_knowledge else []})
+            return {
                 'response': response_text,
                 'intent': intent.value,
                 'conversation_id': conversation_id,
@@ -877,13 +741,8 @@ Da li mogu da vam pomognem oko nečeg drugog?
                 'knowledge_sources': [k['source'] for k in relevant_knowledge] if relevant_knowledge else [],
                 'channel_specific': self.get_channel_specific_response(channel, response_text)
             }
-            
-            logger.info("Odgovor uspešno generisan")
-            return response
-            
         except Exception as e:
             logger.error(f"❌ Greška u generate_response: {str(e)}")
-            logger.error(traceback.format_exc())
             return {
                 'response': "Došlo je do tehničke greške. Molim vas pokušajte ponovo ili kontaktirajte podršku.",
                 'intent': 'unknown',
@@ -893,11 +752,6 @@ Da li mogu da vam pomognem oko nečeg drugog?
             }
     
     def generate_llm_response(self, message: str, context: Dict) -> str:
-        """
-        Generiše odgovor koristeći OpenAI sa ugrađenim kontekstom
-        Ova funkcija se više ne koristi za proizvode, ali ostaje za druge namene
-        """
-        
         try:
             knowledge_text = ""
             if context['relevant_knowledge']:
@@ -907,17 +761,14 @@ Da li mogu da vam pomognem oko nečeg drugog?
                     knowledge_text += f"{idx+1}. Pitanje: {content.get('question', 'Informacija')}\n"
                     knowledge_text += f"   Odgovor: {content.get('answer', content.get('content', ''))}\n"
                     knowledge_text += f"   Izvor: {content.get('source', 'baza znanja')}\n\n"
-            
             history_text = ""
             if context['conversation_history']:
                 history_text = "Istorija razgovora:\n"
                 for msg in context['conversation_history']:
                     role = "Korisnik" if msg['role'] == 'user' else "Asistent"
                     history_text += f"{role}: {msg['content']}\n"
-            
             system_prompt = f"""
             Ti si profesionalni AI asistent za korisničku podršku i e-trgovinu.
-            
             VAŽNA UPUTSTVA:
             1. Budi koncizan, ali ljubazan - koristi prirodan ton razgovora
             2. Odgovaraj isključivo na osnovu dostupnih informacija - ako ne znaš odgovor, priznaj to
@@ -925,22 +776,16 @@ Da li mogu da vam pomognem oko nečeg drugog?
             4. Ako korisnik pita nešto što nije u tvojoj bazi znanja, ljubazno ga uputi da ćeš proslediti agentu
             5. Strukturiraj informacije jasno - koristi bullet points gde je prikladno
             6. Prati kontekst razgovora - ako se korisnik vraća na prethodnu temu, seti se toga
-            
             Detektovana namera korisnika: {context['intent']}
             Kanal komunikacije: {context['channel']}
             """
-            
             user_prompt = f"""
             {history_text}
-            
             {knowledge_text}
-            
             Korisnik pita: {message}
-            
             Molim te da odgovoriš na ovo pitanje na osnovu dostupnih informacija.
             Ako informacija nije dostupna, reci da ćeš proslediti agentu.
             """
-            
             response = openai.ChatCompletion.create(
                 model="gpt-3.5-turbo",
                 messages=[
@@ -950,15 +795,10 @@ Da li mogu da vam pomognem oko nečeg drugog?
                 max_tokens=500,
                 temperature=0.7
             )
-            
             response_text = response.choices[0].message.content.strip()
-            
-            # Konvertuj Markdown linkove u HTML
             markdown_link_pattern = r'\[([^\]]+)\]\(([^)]+)\)'
             response_text = re.sub(markdown_link_pattern, r'<a href="\2" target="_blank" style="color: #069806; text-decoration: underline;">\1</a>', response_text)
-            
             return response_text
-            
         except Exception as e:
             logger.error(f"Greška pri generisanju odgovora: {str(e)}")
             return "Izvinite, došlo je do tehničke greške. Molim vas pokušajte ponovo ili kontaktirajte našu podršku."
@@ -967,15 +807,12 @@ Da li mogu da vam pomognem oko nečeg drugog?
         escalation_keywords = ['agent', 'operater', 'čovek', 'govori sa', 'uživo', 'live chat', 'kontakt']
         if any(keyword in message.lower() for keyword in escalation_keywords):
             return True
-        
         if intent == Intent.CONTACT_SUPPORT:
             return True
-        
         recent_messages = conversation.messages[-6:]
         unknown_count = sum(1 for msg in recent_messages if msg.get('intent') == 'unknown')
         if unknown_count >= 3:
             return True
-        
         return False
     
     def prepare_escalation(self, message: str, conversation: ConversationMemory) -> Dict[str, Any]:
@@ -986,15 +823,12 @@ Da li mogu da vam pomognem oko nečeg drugog?
                 'content': msg['content'],
                 'timestamp': msg.get('timestamp', '')
             })
-        
         transcript.append({
             'role': 'user',
             'content': message,
             'timestamp': datetime.now().isoformat()
         })
-        
         logger.info(f"Eskalacija za korisnika {conversation.user_id} pripremljena")
-        
         return {
             'response': "Povezujem vas sa našim agentom za korisničku podršku. Molim vas sačekajte trenutak.",
             'escalation_needed': True,
@@ -1010,7 +844,6 @@ Da li mogu da vam pomognem oko nečeg drugog?
     def get_or_create_conversation(self, memory_key: str, user_id: str, channel: str) -> ConversationMemory:
         if memory_key in self.active_conversations:
             return self.active_conversations[memory_key]
-        
         conversation = ConversationMemory(
             user_id=user_id,
             messages=[],
@@ -1023,63 +856,30 @@ Da li mogu da vam pomognem oko nečeg drugog?
     def add_to_conversation(self, memory_key: str, message: Dict):
         if memory_key not in self.active_conversations:
             return
-        
         conversation = self.active_conversations[memory_key]
         conversation.messages.append(message)
         conversation.last_updated = datetime.now()
-        
         if 'intent' in message:
             conversation.context['last_intent'] = message['intent']
     
     def get_channel_specific_response(self, channel: str, text: str = None, escalation: bool = False) -> Dict:
         channel_configs = {
-            'web': {
-                'type': 'text',
-                'options': {
-                    'quick_replies': True,
-                    'rich_text': True,
-                    'buttons': True
-                }
-            },
-            'whatsapp': {
-                'type': 'text',
-                'options': {
-                    'max_length': 4096,
-                    'interactive': True,
-                    'buttons': True
-                }
-            },
-            'viber': {
-                'type': 'text',
-                'options': {
-                    'rich_media': True,
-                    'keyboard': True
-                }
-            },
-            'telegram': {
-                'type': 'text',
-                'options': {
-                    'markdown': True,
-                    'inline_keyboards': True
-                }
-            }
+            'web': {'type': 'text', 'options': {'quick_replies': True, 'rich_text': True, 'buttons': True}},
+            'whatsapp': {'type': 'text', 'options': {'max_length': 4096, 'interactive': True, 'buttons': True}},
+            'viber': {'type': 'text', 'options': {'rich_media': True, 'keyboard': True}},
+            'telegram': {'type': 'text', 'options': {'markdown': True, 'inline_keyboards': True}}
         }
-        
         config = channel_configs.get(channel, channel_configs['web'])
-        
         response = {
             'channel': channel,
             'type': config['type'],
             'config': config['options']
         }
-        
         if text:
             response['text'] = text
-            
         if escalation:
             response['escalation'] = {
                 'message': "Povezivanje sa agentom...",
                 'estimated_wait': "2-3 minuta"
             }
-        
         return response
