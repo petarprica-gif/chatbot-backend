@@ -120,7 +120,7 @@ class ContextAwareChatbot:
         except Exception as e:
             logger.error(f"❌ Greška pri preuzimanju vodiča: {e}")
 
-        # Blog
+        # Blog – SADA SAČUVAVAMO DATUM
         try:
             resp = requests.get(f"{base_url}/posts", params={"per_page": 50, "orderby": "date", "order": "desc"}, timeout=15)
             if resp.status_code == 200:
@@ -132,13 +132,16 @@ class ContextAwareChatbot:
                     title = post.get('title', {}).get('rendered', '')
                     content = post.get('content', {}).get('rendered', '')
                     clean = bleach.clean(content, tags=[], attributes={}, strip=True)
+                    # Uzimamo datum objave (ISO 8601 string)
+                    post_date = post.get('date', '')
                     entry = {
                         "id": 301 + added,
                         "question": title,
                         "answer": clean,
                         "keywords": "",
                         "category": "blog",
-                        "source": "blog"
+                        "source": "blog",
+                        "date": post_date       # <-- NOVO
                     }
                     entry['text_for_embedding'] = f"{title} {clean}"
                     self.knowledge_base.append(entry)
@@ -533,12 +536,13 @@ Da li mogu da vam pomognem oko nečeg drugog?
                 self.add_to_conversation(memory_key, {'role': 'assistant', 'content': response_text, 'timestamp': datetime.now().isoformat(), 'intent': intent.value, 'recommended_models': recommended_ids, 'knowledge_used': []})
                 return {'response': response_text, 'intent': intent.value, 'conversation_id': conversation_id, 'escalation_needed': False, 'knowledge_sources': [], 'channel_specific': self.get_channel_specific_response(channel, response_text)}
 
-            # ---------- NOVO: DIREKTNO IZLISTAVANJE VESTI/BLOGA ----------
+            # ---------- NOVO: DIREKTNO IZLISTAVANJE VESTI/BLOGA (SORTIRANO PO DATUMU) ----------
             news_keywords = ['vesti', 'novosti', 'članci', 'blog', 'najnovije', 'vest', 'novost', 'članak']
             if any(keyword in message.lower() for keyword in news_keywords):
                 blog_entries = [item for item in self.knowledge_base if item.get('source') == 'blog']
                 if blog_entries:
-                    blog_entries.sort(key=lambda x: x.get('id', 0), reverse=True)
+                    # Sortiramo opadajuće po datumu (najnoviji prvo). Ako nema datuma, stavljamo na kraj.
+                    blog_entries.sort(key=lambda x: x.get('date', '1970-01-01'), reverse=True)
                     top = blog_entries[:5]
                     parts = ["📰 **Najnovije vesti i članci:**\n"]
                     for i, blog in enumerate(top, 1):
