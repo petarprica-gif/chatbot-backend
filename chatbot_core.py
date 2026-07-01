@@ -37,6 +37,18 @@ class ConversationMemory:
     escalation_needed: bool = False
 
 class ContextAwareChatbot:
+    # -----------------------------------------------------------------
+    # Konstante kalkulatora (identične sajtu)
+    # -----------------------------------------------------------------
+    DAYS_PER_YEAR = 365
+    KURS_RSD = 117.4
+    GAS_MAINT_RATE_RSD = (100/5000 + 325/20000) * KURS_RSD   # ≈ 4.25675 RSD/km
+    ELEC_MAINT_RATE_RSD = (325/20000) * KURS_RSD             # ≈ 1.9085 RSD/km
+
+    # Podrazumevani model (Deer 45, 33 Wh/km)
+    DEFAULT_MODEL_WH = 33          # Wh/km
+    DEFAULT_MODEL_NAME = "Deer 45"
+
     def __init__(self, api_key: str, knowledge_base_path: str = None):
         self.api_key = api_key
         openai.api_key = api_key
@@ -532,56 +544,56 @@ Da li mogu da vam pomognem oko nečeg drugog?
         parts.append("Ako želiš više informacija o nekom modelu, slobodno pitaj!")
         return "".join(parts), recommended_ids
 
-    # ==================== KALKULATOR UŠTEDE (popravljeno) ====================
-    def _parse_distance_to_annual_km(self, message: str) -> float:
-        """Izvlači broj i jedinicu vremena i vraća godišnje kilometre."""
+    # -----------------------------------------------------------------
+    # KALKULATOR – samo za Deer 45
+    # -----------------------------------------------------------------
+    def _parse_daily_km(self, message: str) -> float:
         msg = message.lower()
-        # Pronađi broj (prvi validan)
         numbers = re.findall(r'[\d\.,]+', msg)
-        km = None
         for n_str in numbers:
             try:
                 n = float(n_str.replace(',', '.'))
                 if n > 0:
-                    km = n
-                    break
+                    return n
             except:
                 continue
-        if km is None:
-            raise ValueError("Broj nije pronađen.")
+        raise ValueError("Broj nije pronađen.")
 
-        # Odredi jedinicu
-        if any(w in msg for w in ['dnevno', 'dan', 'dnevna', 'dnevni']):
-            return km * 365
-        elif any(w in msg for w in ['nedeljno', 'sedmično', 'nedelja', 'sedmica']):
-            return km * 52
-        elif any(w in msg for w in ['mesečno', 'mesec', 'mesečna', 'mesečni']):
-            return km * 12
-        elif any(w in msg for w in ['godišnje', 'godina', 'godišnja', 'godinu']):
-            return km  # već godišnje
-        else:
-            # Ako nije navedeno, a broj je mali (<5000), pretpostavljamo da je greška i pitamo ponovo
-            if km < 5000:
-                raise ValueError("Nejasan unos, molim ponovite sa jedinicom (dnevno/mesečno/godišnje).")
-            else:
-                return km  # verovatno godišnje
+    def _calculate_savings_deer(self, km_per_year: float,
+                                 petrol_price: float = 193,
+                                 petrol_l_per_100: float = 4.0,
+                                 elec_price: float = 34.61) -> str:
+        wh_per_km = self.DEFAULT_MODEL_WH
+        kwh_per_100km = wh_per_km / 10
+        petrol_cost_year = (km_per_year * petrol_l_per_100 / 100) * petrol_price
+        elec_cost_year = (km_per_year * kwh_per_100km / 100) * elec_price
+        gas_maint = km_per_year * self.GAS_MAINT_RATE_RSD
+        elec_maint = km_per_year * self.ELEC_MAINT_RATE_RSD
+        total_gas = petrol_cost_year + gas_maint
+        total_elec = elec_cost_year + elec_maint
+        savings = total_gas - total_elec
 
-    def _calculate_savings(self, km_per_year: float) -> str:
-        cost_benzin_per_100km = 4 * 191          # 764 RSD
-        cost_elektricni_per_100km = 2.4 * 34.61  # 83.06 RSD
-        savings_per_100km = cost_benzin_per_100km - cost_elektricni_per_100km
+        return f"""📊 **Proračun za {self.DEFAULT_MODEL_NAME} (≈{wh_per_km} Wh/km)**  
+📅 Godišnja kilometraža: **{km_per_year:,.0f} km**  
 
-        total_savings = round((km_per_year / 100) * savings_per_100km, 2)
-        monthly_savings = round(total_savings / 12, 2)
+⛽ **Benzinski skuter:**  
+  💰 Trošak goriva: **{petrol_cost_year:,.0f} RSD**  
+  🔧 Održavanje: **{gas_maint:,.0f} RSD**  
+  📊 UKUPNO: **{total_gas:,.0f} RSD**  
 
-        # Bez preporuke modela – samo link ka kalkulatoru
-        return f"""💸 <strong>Vaša godišnja ušteda:</strong> <span style="color:#069806; font-size:1.2em;">{total_savings:,} RSD</span> ({monthly_savings:,} RSD mesečno)
+⚡ **{self.DEFAULT_MODEL_NAME}:**  
+  💰 Trošak struje: **{elec_cost_year:,.0f} RSD**  
+  🔧 Održavanje: **{elec_maint:,.0f} RSD**  
+  📊 UKUPNO: **{total_elec:,.0f} RSD**  
 
-🧮 <em>Računato na osnovu prosečne cene benzina (191 RSD/L) i struje (34.61 RSD/kWh) za 100 km.</em>
+💡 **UKUPNA GODIŠNJA UŠTEDA:** **{savings:,.0f} RSD**  
 
-🔗 <a href='https://zapmoto.rs/kalkulator-ustede-elektricnim-skuterom/' target='_blank' style='color: #069806; text-decoration: underline;'>Isprobajte detaljni kalkulator uštede</a>"""
+⚠️ *Ušteda za druge modele se razlikuje.*  
+🔗 <a href='https://zapmoto.rs/kalkulator-ustede-elektricnim-skuterom/' target='_blank' style='color: #069806; text-decoration: underline;'>Izračunajte za sve modele u detaljnom kalkulatoru</a>"""
 
-    # ==================== GLAVNA generate_response ====================
+    # -----------------------------------------------------------------
+    # GLAVNA generate_response
+    # -----------------------------------------------------------------
     def generate_response(self, message: str, user_id: str, conversation_id: str = None, channel: str = "web") -> Dict[str, Any]:
         try:
             logger.info(f"===== GENERATE_RESPONSE POZVAN =====")
@@ -589,25 +601,27 @@ Da li mogu da vam pomognem oko nečeg drugog?
             conversation = self.get_or_create_conversation(memory_key, user_id, channel)
             intent = self.detect_intent(message, conversation.messages)
 
-            # Rukovanje kalkulatorom uštede
+            # ===================== KALKULATOR UŠTEDE =====================
             if intent == Intent.SAVINGS_CALCULATOR or conversation.context.get('awaiting_savings_km'):
                 if not conversation.context.get('awaiting_savings_km'):
                     conversation.context['awaiting_savings_km'] = True
-                    response_text = "Da bih izračunao uštedu, molim vas unesite koliko kilometara godišnje (ili mesečno/dnevno) prelazite. Na primer: \"5000 km godišnje\" ili \"90 km dnevno\"."
+                    response_text = "Da bih izračunao uštedu, unesite koliko kilometara dnevno prelazite (npr. 80)."
                     self.add_to_conversation(memory_key, {'role': 'user', 'content': message, 'timestamp': datetime.now().isoformat()})
                     self.add_to_conversation(memory_key, {'role': 'assistant', 'content': response_text, 'timestamp': datetime.now().isoformat(), 'intent': intent.value, 'knowledge_used': []})
                     return {'response': response_text, 'intent': intent.value, 'conversation_id': conversation_id, 'escalation_needed': False, 'knowledge_sources': [], 'channel_specific': self.get_channel_specific_response(channel, response_text)}
 
                 try:
-                    annual_km = self._parse_distance_to_annual_km(message)
-                except ValueError as e:
-                    response_text = f"Nisam uspeo da izračunam: {str(e)} Unesite broj i jedinicu (npr. \"90 km dnevno\", \"15000 km godišnje\")."
+                    daily = self._parse_daily_km(message)
+                except ValueError:
+                    response_text = "Molim vas unesite broj kilometara (npr. 80)."
                     self.add_to_conversation(memory_key, {'role': 'user', 'content': message, 'timestamp': datetime.now().isoformat()})
                     self.add_to_conversation(memory_key, {'role': 'assistant', 'content': response_text, 'timestamp': datetime.now().isoformat(), 'intent': intent.value, 'knowledge_used': []})
                     return {'response': response_text, 'intent': intent.value, 'conversation_id': conversation_id, 'escalation_needed': False, 'knowledge_sources': [], 'channel_specific': self.get_channel_specific_response(channel, response_text)}
 
+                yearly = daily * self.DAYS_PER_YEAR
+                response_text = self._calculate_savings_deer(yearly)
                 conversation.context['awaiting_savings_km'] = False
-                response_text = self._calculate_savings(annual_km)
+
                 self.add_to_conversation(memory_key, {'role': 'user', 'content': message, 'timestamp': datetime.now().isoformat()})
                 self.add_to_conversation(memory_key, {'role': 'assistant', 'content': response_text, 'timestamp': datetime.now().isoformat(), 'intent': intent.value, 'knowledge_used': ['kalkulator']})
                 return {
@@ -619,6 +633,7 @@ Da li mogu da vam pomognem oko nečeg drugog?
                     'channel_specific': self.get_channel_specific_response(channel, response_text)
                 }
 
+            # ===================== OSTALE NAMERE =====================
             if intent == Intent.GREETING:
                 return self.generate_greeting_response(message, user_id, conversation_id, channel)
             if self.should_escalate(message, intent, conversation):
