@@ -15,9 +15,6 @@ import bleach        # za čišćenje HTML-a
 
 logger = logging.getLogger(__name__)
 
-# Redis je POTPUNO ISKLJUČEN - ne koristimo ga
-# Svi pokušaji povezivanja sa Redis-om su uklonjeni
-
 class Intent(Enum):
     GREETING = "greeting"
     PRODUCT_QUESTION = "product_question"
@@ -31,7 +28,6 @@ class Intent(Enum):
 
 @dataclass
 class ConversationMemory:
-    """Čuva kontekst razgovora"""
     user_id: str
     messages: List[Dict]
     last_updated: datetime
@@ -41,50 +37,34 @@ class ConversationMemory:
 
 class ContextAwareChatbot:
     def __init__(self, api_key: str, knowledge_base_path: str = None):
-        """
-        Inicijalizacija chatbota sa kontekstualnom svešću
-        
-        Args:
-            api_key: API ključ za OpenAI
-            knowledge_base_path: Putanja do fajla sa bazom znanja
-        """
         self.api_key = api_key
         openai.api_key = api_key
-        
-        # Ako putanja nije data, koristi apsolutnu putanju
+
         if knowledge_base_path is None:
             current_dir = Path(__file__).parent.absolute()
             knowledge_base_path = str(current_dir / "knowledge_base.json")
             logger.info(f"Koristim apsolutnu putanju: {knowledge_base_path}")
-        
-        # Učitavanje baze znanja
+
+        # Učitavanje ručne baze (proizvodi, kontakt)
         self.knowledge_base = self.load_knowledge_base(knowledge_base_path)
-        
-        # Keširanje embedinga za brže pretraživanje (čuvaćemo u memoriji)
+
+        # Keš za embeddinge
         self.embedding_cache = {}
-        
-        # Aktivne konverzacije (čuvamo u RAM memoriji)
+
+        # Aktivne konverzacije
         self.active_conversations: Dict[str, ConversationMemory] = {}
-        
+
         # ---------- AUTOMATSKO PREUZIMANJE SADRŽAJA SA SAJTA ----------
         self.enrich_knowledge_base()
-        
+
         logger.info(f"Chatbot inicijalizovan sa {len(self.knowledge_base)} stavki u bazi znanja")
-    
+
+    # ==================== POMOĆNE FUNKCIJE ====================
     def get_embedding(self, text: str) -> List[float]:
-        """
-        Generiše embedding koristeći OpenAI API
-        
-        Args:
-            text: Tekst za koji se generiše embedding
-            
-        Returns:
-            Lista float vrednosti (embedding vektor)
-        """
         cache_key = f"emb_{hash(text)}"
         if cache_key in self.embedding_cache:
             return self.embedding_cache[cache_key]
-        
+
         try:
             response = openai.Embedding.create(
                 model="text-embedding-3-small",
@@ -98,17 +78,8 @@ class ContextAwareChatbot:
         except Exception as e:
             logger.error(f"Greška pri generisanju embeddinga: {str(e)}")
             return [0.0] * 1536
-    
+
     def cosine_similarity(self, vec1: List[float], vec2: List[float]) -> float:
-        """
-        Računa kosinusnu sličnost između dva vektora
-        
-        Args:
-            vec1, vec2: Vektori za poređenje
-            
-        Returns:
-            Sličnost između 0 i 1
-        """
         vec1 = np.array(vec1)
         vec2 = np.array(vec2)
         dot_product = np.dot(vec1, vec2)
@@ -117,21 +88,15 @@ class ContextAwareChatbot:
         if norm1 == 0 or norm2 == 0:
             return 0.0
         return float(dot_product / (norm1 * norm2))
-    
+
     def load_knowledge_base(self, path: str) -> List[Dict]:
-        """
-        Učitava bazu znanja iz JSON fajla
-        """
         try:
-            logger.info(f"Pokušavam da učitam bazu znanja sa putanje: {path}")
             with open(path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
-            
             for item in data:
                 text_for_embedding = f"{item.get('question', '')} {item.get('answer', '')} {item.get('keywords', '')}"
                 item['text_for_embedding'] = text_for_embedding
-            
-            logger.info(f"Učitano {len(data)} stavki u bazu znanja")
+            logger.info(f"Učitano {len(data)} stavki iz baze znanja (ručno)")
             return data
         except FileNotFoundError:
             logger.error(f"Baza znanja nije pronađena na putanji: {path}")
@@ -139,16 +104,12 @@ class ContextAwareChatbot:
         except Exception as e:
             logger.error(f"Greška pri učitavanju baze znanja: {str(e)}")
             return []
-    
+
     # ==================== NOVE METODE ZA AUTOMATSKO UČENJE ====================
     def enrich_knowledge_base(self):
-        """
-        Povlači Vodič za kupovinu, članke bloga i proizvode sa WordPress/WooCommerce sajta
-        i dodaje ih u bazu (u memoriji). Ručno uneti podaci u JSON-u ostaju netaknuti.
-        """
         base_url = "https://zapmoto.rs/wp-json/wp/v2"
 
-        # --- 1. Vodič za kupovinu (stranica) ---
+        # --- 1. Vodič za kupovinu ---
         try:
             resp = requests.get(f"{base_url}/pages", params={"slug": "vodic-za-kupovinu"}, timeout=15)
             if resp.status_code == 200 and resp.json():
@@ -205,7 +166,6 @@ class ContextAwareChatbot:
         self._fetch_products_from_woocommerce()
 
     def _fetch_products_from_wp(self, base_url: str):
-        """Pokušaj da dohvati proizvode preko javnog WP REST API-ja (custom post type 'product')"""
         try:
             for endpoint in ["/product", "/products"]:
                 try:
@@ -223,12 +183,11 @@ class ContextAwareChatbot:
                             content = prod.get('content', {}).get('rendered', '')
                             clean = bleach.clean(content, tags=[], attributes={}, strip=True)
 
-                            # Pokušaj da odrediš kategoriju (možeš doraditi)
+                            # Pokušaj da odrediš kategoriju
                             category = "skuteri"  # podrazumevano
                             cats = prod.get('categories', [])
                             for cat_id in cats:
-                                # Ako znaš ID kategorija, ovde možeš mapirati
-                                pass
+                                pass  # možeš mapirati ID kategorija ako želiš
 
                             question = f"Koje su karakteristike {title}?"
                             entry = {
@@ -251,7 +210,6 @@ class ContextAwareChatbot:
             logger.error(f"❌ Greška pri automatskom preuzimanju proizvoda (WP): {e}")
 
     def _fetch_products_from_woocommerce(self):
-        """Ako postoji WooCommerce API ključ u ENV, koristi ga za proizvode."""
         consumer_key = os.getenv('WOOCOMMERCE_CONSUMER_KEY')
         consumer_secret = os.getenv('WOOCOMMERCE_CONSUMER_SECRET')
         if not consumer_key or not consumer_secret:
@@ -292,7 +250,7 @@ class ContextAwareChatbot:
         except Exception as e:
             logger.error(f"❌ Greška pri preuzimanju proizvoda preko WooCommerce API-ja: {e}")
 
-    # ==================== ORIGINALNE METODE (ne menjati) ====================
+    # ==================== ORIGINALNE METODE (sa manjim izmenama) ====================
     def retrieve_relevant_knowledge(self, query: str, top_k: int = 5) -> List[Dict]:
         if not self.knowledge_base:
             logger.warning("Baza znanja je prazna, ne mogu da pretražujem")
@@ -322,7 +280,7 @@ class ContextAwareChatbot:
         except Exception as e:
             logger.error(f"Greška u retrieve_relevant_knowledge: {str(e)}")
             return []
-    
+
     def detect_intent(self, message: str, conversation_history: List[Dict]) -> Intent:
         message_lower = message.lower().strip()
         greetings = [
@@ -388,7 +346,7 @@ class ContextAwareChatbot:
         except Exception as e:
             logger.error(f"Greška pri detekciji namere: {str(e)}")
             return Intent.UNKNOWN
-    
+
     def generate_greeting_response(self, message: str, user_id: str, conversation_id: str = None, channel: str = "web") -> Dict[str, Any]:
         greeting_responses = {
             'dobro jutro': 'Dobro jutro! Kako vam mogu pomoći danas?',
@@ -414,18 +372,9 @@ class ContextAwareChatbot:
                 break
 
         memory_key = f"{user_id}:{conversation_id}" if conversation_id else user_id
-        self.add_to_conversation(memory_key, {
-            'role': 'user',
-            'content': message,
-            'timestamp': datetime.now().isoformat()
-        })
-        self.add_to_conversation(memory_key, {
-            'role': 'assistant',
-            'content': response_text,
-            'timestamp': datetime.now().isoformat(),
-            'intent': 'greeting',
-            'knowledge_used': []
-        })
+        self.add_to_conversation(memory_key, {'role': 'user', 'content': message, 'timestamp': datetime.now().isoformat()})
+        self.add_to_conversation(memory_key, {'role': 'assistant', 'content': response_text, 'timestamp': datetime.now().isoformat(), 'intent': 'greeting', 'knowledge_used': []})
+
         return {
             'response': response_text,
             'intent': 'greeting',
@@ -434,7 +383,7 @@ class ContextAwareChatbot:
             'knowledge_sources': [],
             'channel_specific': self.get_channel_specific_response(channel, response_text)
         }
-    
+
     def extract_criteria_from_message(self, message: str) -> Dict[str, any]:
         logger.info(f"===== extract_criteria_from_message POZVAN =====")
         criteria_prompt = f"""
@@ -477,7 +426,7 @@ class ContextAwareChatbot:
             if key not in criteria:
                 criteria[key] = None
         return criteria
-    
+
     def filter_models_by_criteria(self, criteria: Dict[str, any], message: str = "") -> List[Dict]:
         logger.info(f"===== filter_models_by_criteria POZVAN =====")
         filtered_models = []
@@ -485,19 +434,19 @@ class ContextAwareChatbot:
             model_name = item.get('question', 'nepoznato')
             if item.get('source') != 'proizvodi':
                 continue
-            
+
             if 'kategorija' in criteria and criteria['kategorija']:
                 if item.get('category') != criteria['kategorija']:
                     continue
-            
+
             answer = item.get('answer', '').lower()
-            
+
             if 'kategorija_vozacke' in criteria and criteria['kategorija_vozacke'] == 'AM':
                 if 'grad' in message.lower() or 'gradsku' in message.lower() or 'gradska' in message.lower():
                     if item.get('category') == 'skuteri':
                         filtered_models.append(item)
                         continue
-            
+
             if 'kategorija_vozacke' in criteria and criteria['kategorija_vozacke']:
                 vozacka = criteria['kategorija_vozacke'].lower()
                 if vozacka == 'am':
@@ -505,7 +454,7 @@ class ContextAwareChatbot:
                         continue
                 elif vozacka == 'a1' and 'a1 kategorija' not in answer:
                     continue
-            
+
             domet_match = re.search(r'domet do (\d+) km', answer)
             if domet_match:
                 domet = int(domet_match.group(1))
@@ -523,11 +472,11 @@ class ContextAwareChatbot:
             else:
                 if 'min_domet' in criteria or 'max_domet' in criteria:
                     continue
-            
+
             filtered_models.append(item)
         logger.info(f"===== FILTER ZAVRŠEN: PRONAĐENO {len(filtered_models)} MODEL =====")
         return filtered_models
-    
+
     def extract_brand_from_query(self, query: str) -> str:
         query_lower = query.lower()
         brands = ['pusa', 'lipo', 'deer', 'e2go', 'puma', 'tiger', 'lion']
@@ -535,12 +484,13 @@ class ContextAwareChatbot:
             if brand in query_lower:
                 return brand
         return ""
-    
+
     def format_product_response(self, relevant_items: List[Dict], original_query: str = "") -> str:
         if not relevant_items:
             return ""
         kontakt_items = [item for item in relevant_items if item['content'].get('category') == 'kontakt']
-        if kontakt_items and any(word in original_query.lower() for word in ['kontakt', 'telefon', 'email', 'pozov', 'javite']):
+        # Proširena lista reči za prepoznavanje kontakta
+        if kontakt_items and any(word in original_query.lower() for word in ['kontakt', 'telefon', 'email', 'pozov', 'javite', 'obratim', 'obratiti', 'kontaktirati', 'pisati', 'poruka']):
             relevant_items = kontakt_items
         else:
             brand = self.extract_brand_from_query(original_query)
@@ -552,7 +502,7 @@ class ContextAwareChatbot:
                         filtered_items.append(item)
                 if filtered_items:
                     relevant_items = filtered_items
-        
+
         response_parts = ["Na osnovu vašeg pitanja, evo relevantnih informacija:"]
         for idx, item in enumerate(relevant_items, 1):
             content = item['content']
@@ -565,7 +515,7 @@ class ContextAwareChatbot:
             if 'cena' in content:
                 response_parts.append(f"&nbsp;&nbsp;&nbsp;- <strong>Cena:</strong> {content['cena']}<br>")
         return "".join(response_parts)
-    
+
     def offer_contact_options(self, message: str, user_id: str, conversation_id: str = None, channel: str = "web") -> Dict[str, Any]:
         phone = "+381603534000"
         whatsapp_link = f"https://wa.me/{phone}"
@@ -626,7 +576,7 @@ Da li mogu da vam pomognem oko nečeg drugog?
             'knowledge_sources': [],
             'channel_specific': self.get_channel_specific_response(channel, contact_message)
         }
-    
+
     def generate_recommendation_response(self, message: str, criteria: Dict[str, any], conversation_history: List[Dict]) -> tuple:
         logger.info(f"===== generate_recommendation_response POZVAN =====")
         previous_models = []
@@ -672,10 +622,10 @@ Da li mogu da vam pomognem oko nečeg drugog?
         response_parts.append("Ako želiš više informacija o nekom modelu, slobodno pitaj! Ako ti se neki od ovih modela ne sviđa, reci mi pa ću probati da nađem drugačije opcije.")
         response_text = "".join(response_parts)
         return response_text, recommended_ids
-    
-    def generate_response(self, 
-                         message: str, 
-                         user_id: str, 
+
+    def generate_response(self,
+                         message: str,
+                         user_id: str,
                          conversation_id: str = None,
                          channel: str = "web") -> Dict[str, Any]:
         try:
@@ -701,7 +651,7 @@ Da li mogu da vam pomognem oko nečeg drugog?
                     'knowledge_sources': [],
                     'channel_specific': self.get_channel_specific_response(channel, response_text)
                 }
-            
+
             logger.info("Standardna obrada pitanja...")
             relevant_knowledge = self.retrieve_relevant_knowledge(message)
             has_good_answer = False
@@ -713,8 +663,8 @@ Da li mogu da vam pomognem oko nečeg drugog?
             if not has_good_answer:
                 logger.info(f"Nema dovoljno relevantnog odgovora (najbolji score: {best_score:.2f})")
                 return self.offer_contact_options(message, user_id, conversation_id, channel)
-            
-            # ---------- IZMENA: Razlikovanje proizvoda od vodiča/bloga ----------
+
+            # ---------- IZMENA: Razlikovanje proizvoda od vodiča/bloga/kontakta ----------
             top_item = relevant_knowledge[0]['content']
             if top_item.get('source') in ['vodic', 'blog']:
                 knowledge_text = ""
@@ -728,11 +678,16 @@ Da li mogu da vam pomognem oko nečeg drugog?
                     'channel': channel
                 }
                 response_text = self.generate_llm_response(message, context)
+            elif top_item.get('source') == 'kontakt' or top_item.get('category') == 'kontakt':
+                # Direktno prikaži kontakt informacije
+                contact_answer = top_item.get('answer', '')
+                response_text = f"Naš tim vam stoji na raspolaganju:\n\n{contact_answer}"
             else:
                 response_text = self.format_product_response(relevant_knowledge, message)
-            
+
             self.add_to_conversation(memory_key, {'role': 'user', 'content': message, 'timestamp': datetime.now().isoformat()})
             self.add_to_conversation(memory_key, {'role': 'assistant', 'content': response_text, 'timestamp': datetime.now().isoformat(), 'intent': intent.value, 'knowledge_used': [k['source'] for k in relevant_knowledge] if relevant_knowledge else []})
+
             return {
                 'response': response_text,
                 'intent': intent.value,
@@ -750,7 +705,7 @@ Da li mogu da vam pomognem oko nečeg drugog?
                 'escalation_needed': True,
                 'knowledge_sources': []
             }
-    
+
     def generate_llm_response(self, message: str, context: Dict) -> str:
         try:
             knowledge_text = ""
@@ -802,7 +757,7 @@ Da li mogu da vam pomognem oko nečeg drugog?
         except Exception as e:
             logger.error(f"Greška pri generisanju odgovora: {str(e)}")
             return "Izvinite, došlo je do tehničke greške. Molim vas pokušajte ponovo ili kontaktirajte našu podršku."
-    
+
     def should_escalate(self, message: str, intent: Intent, conversation: ConversationMemory) -> bool:
         escalation_keywords = ['agent', 'operater', 'čovek', 'govori sa', 'uživo', 'live chat', 'kontakt']
         if any(keyword in message.lower() for keyword in escalation_keywords):
@@ -814,7 +769,7 @@ Da li mogu da vam pomognem oko nečeg drugog?
         if unknown_count >= 3:
             return True
         return False
-    
+
     def prepare_escalation(self, message: str, conversation: ConversationMemory) -> Dict[str, Any]:
         transcript = []
         for msg in conversation.messages:
@@ -836,11 +791,11 @@ Da li mogu da vam pomognem oko nečeg drugog?
                 'transcript': transcript,
                 'conversation_id': conversation.user_id
             },
-            'channel_specific': self.get_channel_specific_response(conversation.context.get('channel', 'web'), 
-                                                                   None, 
+            'channel_specific': self.get_channel_specific_response(conversation.context.get('channel', 'web'),
+                                                                   None,
                                                                    escalation=True)
         }
-    
+
     def get_or_create_conversation(self, memory_key: str, user_id: str, channel: str) -> ConversationMemory:
         if memory_key in self.active_conversations:
             return self.active_conversations[memory_key]
@@ -852,7 +807,7 @@ Da li mogu da vam pomognem oko nečeg drugog?
         )
         self.active_conversations[memory_key] = conversation
         return conversation
-    
+
     def add_to_conversation(self, memory_key: str, message: Dict):
         if memory_key not in self.active_conversations:
             return
@@ -861,7 +816,7 @@ Da li mogu da vam pomognem oko nečeg drugog?
         conversation.last_updated = datetime.now()
         if 'intent' in message:
             conversation.context['last_intent'] = message['intent']
-    
+
     def get_channel_specific_response(self, channel: str, text: str = None, escalation: bool = False) -> Dict:
         channel_configs = {
             'web': {'type': 'text', 'options': {'quick_replies': True, 'rich_text': True, 'buttons': True}},
