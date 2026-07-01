@@ -24,7 +24,7 @@ class Intent(Enum):
     CONTACT_SUPPORT = "contact_support"
     FAREWELL = "farewell"
     PRODUCT_RECOMMENDATION = "product_recommendation"
-    SAVINGS_CALCULATOR = "savings_calculator"   # NOVO
+    SAVINGS_CALCULATOR = "savings_calculator"
     UNKNOWN = "unknown"
 
 @dataclass
@@ -263,7 +263,7 @@ class ContextAwareChatbot:
     def detect_intent(self, message: str, conversation_history: List[Dict]) -> Intent:
         message_lower = message.lower().strip()
 
-        # NOVO: Detekcija kalkulatora uštede
+        # Kalkulator uštede
         savings_keywords = ['ušted', 'kalkulator', 'isplati', 'troškovi', 'uštedeti', 'isplativost']
         if any(kw in message_lower for kw in savings_keywords):
             return Intent.SAVINGS_CALCULATOR
@@ -532,38 +532,52 @@ Da li mogu da vam pomognem oko nečeg drugog?
         parts.append("Ako želiš više informacija o nekom modelu, slobodno pitaj!")
         return "".join(parts), recommended_ids
 
-    # ==================== KALKULATOR UŠTEDE ====================
+    # ==================== KALKULATOR UŠTEDE (popravljeno) ====================
+    def _parse_distance_to_annual_km(self, message: str) -> float:
+        """Izvlači broj i jedinicu vremena i vraća godišnje kilometre."""
+        msg = message.lower()
+        # Pronađi broj (prvi validan)
+        numbers = re.findall(r'[\d\.,]+', msg)
+        km = None
+        for n_str in numbers:
+            try:
+                n = float(n_str.replace(',', '.'))
+                if n > 0:
+                    km = n
+                    break
+            except:
+                continue
+        if km is None:
+            raise ValueError("Broj nije pronađen.")
+
+        # Odredi jedinicu
+        if any(w in msg for w in ['dnevno', 'dan', 'dnevna', 'dnevni']):
+            return km * 365
+        elif any(w in msg for w in ['nedeljno', 'sedmično', 'nedelja', 'sedmica']):
+            return km * 52
+        elif any(w in msg for w in ['mesečno', 'mesec', 'mesečna', 'mesečni']):
+            return km * 12
+        elif any(w in msg for w in ['godišnje', 'godina', 'godišnja', 'godinu']):
+            return km  # već godišnje
+        else:
+            # Ako nije navedeno, a broj je mali (<5000), pretpostavljamo da je greška i pitamo ponovo
+            if km < 5000:
+                raise ValueError("Nejasan unos, molim ponovite sa jedinicom (dnevno/mesečno/godišnje).")
+            else:
+                return km  # verovatno godišnje
+
     def _calculate_savings(self, km_per_year: float) -> str:
-        # Podaci iz članka: benzinski vs električni skuter (u RSD)
         cost_benzin_per_100km = 4 * 191          # 764 RSD
         cost_elektricni_per_100km = 2.4 * 34.61  # 83.06 RSD
-        savings_per_100km = cost_benzin_per_100km - cost_elektricni_per_100km  # 680.94 RSD
+        savings_per_100km = cost_benzin_per_100km - cost_elektricni_per_100km
 
         total_savings = round((km_per_year / 100) * savings_per_100km, 2)
         monthly_savings = round(total_savings / 12, 2)
 
-        # Predlažemo prvi dostupan model (po dometu)
-        products = [item for item in self.knowledge_base if item.get('source') == 'proizvodi']
-        recommended_model = None
-        if products:
-            # Biraj model sa najvećim dometom (primer)
-            def get_domet(item):
-                match = re.search(r'domet do (\d+) km', item.get('answer', ''))
-                return int(match.group(1)) if match else 0
-            products.sort(key=get_domet, reverse=True)
-            recommended_model = products[0]
-
-        model_text = ""
-        if recommended_model:
-            name = recommended_model.get('question', '').replace("Koje su karakteristike ", "").replace("?", "")
-            link_match = re.search(r"https?://[^\s']+", recommended_model.get('answer', ''))
-            link = link_match.group(0) if link_match else "https://zapmoto.rs"
-            model_text = f"\n\n🎯 <strong>Preporučeni model:</strong> <a href='{link}' target='_blank' style='color: #069806;'>{name}</a>"
-
+        # Bez preporuke modela – samo link ka kalkulatoru
         return f"""💸 <strong>Vaša godišnja ušteda:</strong> <span style="color:#069806; font-size:1.2em;">{total_savings:,} RSD</span> ({monthly_savings:,} RSD mesečno)
 
-🧮 <em>Računato na osnovu prosečne cene benzina (191 RSD/L) i struje (34.61 RSD/kWh).</em>
-{model_text}
+🧮 <em>Računato na osnovu prosečne cene benzina (191 RSD/L) i struje (34.61 RSD/kWh) za 100 km.</em>
 
 🔗 <a href='https://zapmoto.rs/kalkulator-ustede-elektricnim-skuterom/' target='_blank' style='color: #069806; text-decoration: underline;'>Isprobajte detaljni kalkulator uštede</a>"""
 
@@ -575,40 +589,25 @@ Da li mogu da vam pomognem oko nečeg drugog?
             conversation = self.get_or_create_conversation(memory_key, user_id, channel)
             intent = self.detect_intent(message, conversation.messages)
 
-            # NOVO: Rukovanje kalkulatorom uštede (dve faze)
+            # Rukovanje kalkulatorom uštede
             if intent == Intent.SAVINGS_CALCULATOR or conversation.context.get('awaiting_savings_km'):
-                # Faza 1: pitaj za kilometre
                 if not conversation.context.get('awaiting_savings_km'):
                     conversation.context['awaiting_savings_km'] = True
-                    response_text = "Da bih izračunao uštedu, molim vas unesite koliko kilometara godišnje (ili mesečno) prelazite. Na primer: \"5000 km godišnje\"."
+                    response_text = "Da bih izračunao uštedu, molim vas unesite koliko kilometara godišnje (ili mesečno/dnevno) prelazite. Na primer: \"5000 km godišnje\" ili \"90 km dnevno\"."
                     self.add_to_conversation(memory_key, {'role': 'user', 'content': message, 'timestamp': datetime.now().isoformat()})
                     self.add_to_conversation(memory_key, {'role': 'assistant', 'content': response_text, 'timestamp': datetime.now().isoformat(), 'intent': intent.value, 'knowledge_used': []})
                     return {'response': response_text, 'intent': intent.value, 'conversation_id': conversation_id, 'escalation_needed': False, 'knowledge_sources': [], 'channel_specific': self.get_channel_specific_response(channel, response_text)}
 
-                # Faza 2: pokušaj da izvučeš broj
-                numbers = re.findall(r'[\d\.,]+', message)
-                km = None
-                for n_str in numbers:
-                    try:
-                        n = float(n_str.replace(',', '.'))
-                        if n > 0:
-                            km = n
-                            break
-                    except:
-                        continue
-
-                if km is None:
-                    response_text = "Nisam uspeo da prepoznam broj. Molim vas unesite broj kilometara (npr. 8000)."
+                try:
+                    annual_km = self._parse_distance_to_annual_km(message)
+                except ValueError as e:
+                    response_text = f"Nisam uspeo da izračunam: {str(e)} Unesite broj i jedinicu (npr. \"90 km dnevno\", \"15000 km godišnje\")."
                     self.add_to_conversation(memory_key, {'role': 'user', 'content': message, 'timestamp': datetime.now().isoformat()})
                     self.add_to_conversation(memory_key, {'role': 'assistant', 'content': response_text, 'timestamp': datetime.now().isoformat(), 'intent': intent.value, 'knowledge_used': []})
                     return {'response': response_text, 'intent': intent.value, 'conversation_id': conversation_id, 'escalation_needed': False, 'knowledge_sources': [], 'channel_specific': self.get_channel_specific_response(channel, response_text)}
 
-                # Ako je uneta mesečna kilometraža (broj manji od, recimo, 5000), može biti mesečna -> pomnoži sa 12
-                if km < 5000:  # verovatno mesečna
-                    km = km * 12
-                # Resetuj stanje
                 conversation.context['awaiting_savings_km'] = False
-                response_text = self._calculate_savings(km)
+                response_text = self._calculate_savings(annual_km)
                 self.add_to_conversation(memory_key, {'role': 'user', 'content': message, 'timestamp': datetime.now().isoformat()})
                 self.add_to_conversation(memory_key, {'role': 'assistant', 'content': response_text, 'timestamp': datetime.now().isoformat(), 'intent': intent.value, 'knowledge_used': ['kalkulator']})
                 return {
@@ -632,7 +631,7 @@ Da li mogu da vam pomognem oko nečeg drugog?
                 self.add_to_conversation(memory_key, {'role': 'assistant', 'content': response_text, 'timestamp': datetime.now().isoformat(), 'intent': intent.value, 'recommended_models': recommended_ids, 'knowledge_used': []})
                 return {'response': response_text, 'intent': intent.value, 'conversation_id': conversation_id, 'escalation_needed': False, 'knowledge_sources': [], 'channel_specific': self.get_channel_specific_response(channel, response_text)}
 
-            # ---------- NOVO: DIREKTNO IZLISTAVANJE VESTI/BLOGA ----------
+            # Vesti
             news_keywords = ['vesti', 'novosti', 'članci', 'blog', 'najnovije', 'vest', 'novost', 'članak']
             if any(keyword in message.lower() for keyword in news_keywords):
                 blog_entries = [item for item in self.knowledge_base if item.get('source') == 'blog']
