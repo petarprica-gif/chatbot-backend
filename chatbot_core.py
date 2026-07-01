@@ -669,12 +669,15 @@ Da li mogu da vam pomognem oko nečeg drugog?
             logger.error(f"Greška pri generisanju odgovora: {str(e)}")
             return "Izvinite, došlo je do tehničke greške."
 
+    # --------------------------- Popravljena eskalacija ---------------------------
     def should_escalate(self, message: str, intent: Intent, conversation: ConversationMemory) -> bool:
-        escalation_keywords = ['agent', 'operater', 'čovek', 'govori sa', 'uživo', 'live chat', 'kontakt']
+        # Samo eksplicitni zahtevi za agentom ili operaterom eskaliraju.
+        # Reč "kontakt" i namera CONTACT_SUPPORT više ne eskaliraju, jer chatbot sada
+        # direktno prikazuje kontakt informacije sa ikonama.
+        escalation_keywords = ['agent', 'operater', 'čovek', 'govori sa', 'uživo', 'live chat']
         if any(keyword in message.lower() for keyword in escalation_keywords):
             return True
-        if intent == Intent.CONTACT_SUPPORT:
-            return True
+        # Više ne eskalira automatski na CONTACT_SUPPORT
         recent = conversation.messages[-6:]
         if sum(1 for msg in recent if msg.get('intent') == 'unknown') >= 3:
             return True
