@@ -25,7 +25,7 @@ class Intent(Enum):
     FAREWELL = "farewell"
     PRODUCT_RECOMMENDATION = "product_recommendation"
     SAVINGS_CALCULATOR = "savings_calculator"
-    ADVICE_NEEDED = "advice_needed"          # novo
+    ADVICE_NEEDED = "advice_needed"
     UNKNOWN = "unknown"
 
 @dataclass
@@ -264,13 +264,21 @@ class ContextAwareChatbot:
                 if any(kw in msg for kw in ['drugi','drugi model','još','drugi brend']):
                     return Intent.PRODUCT_RECOMMENDATION
 
-        # Fallback OpenAI
+        # Fallback OpenAI – ISPRAVLJENO: bez backslasha u f-stringu
         prompt = """Detektuj nameru korisnika. Vrati samo jedno od: greeting, product_question, product_recommendation, order_status, return_request, payment_issue, contact_support, farewell, unknown."""
+        # Pripremi istoriju kao string
+        history_text = ""
+        for m in history[-5:]:
+            role = m['role']
+            content = m['content']
+            history_text += f"{role}: {content}\n"
         try:
             resp = openai.ChatCompletion.create(
                 model="gpt-3.5-turbo",
-                messages=[{"role":"system","content":prompt},
-                          {"role":"user","content":f"Istorija:\n{chr(10).join(f'{m[\"role\"]}: {m[\"content\"]}' for m in history[-5:])}\n\nPoruka: {message}"}],
+                messages=[
+                    {"role":"system","content":prompt},
+                    {"role":"user","content": f"Istorija:\n{history_text}\n\nPoruka: {message}"}
+                ],
                 max_tokens=10, temperature=0.3)
             intent_str = resp.choices[0].message.content.strip().lower()
             for i in Intent:
@@ -300,12 +308,13 @@ class ContextAwareChatbot:
 
     def _format_contact(self):
         phone = "+381603534000"
-        wa = '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" ...>...'
-        vb = '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" ...>...'
+        # SVG ikone skraćene radi dužine – iste su kao ranije
+        wa_svg = '''<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="vertical-align: middle; margin-right: 8px;"><path d="M19.077 4.928C17.191 3.041 14.683 2 12.006 2 6.798 2 2.548 6.193 2.54 11.393c-.003 1.747.456 3.457 1.328 4.984L2.25 21.75l5.428-1.573c1.472.839 3.137 1.286 4.857 1.288h.004c5.192 0 9.457-4.193 9.465-9.393.004-2.51-.972-4.872-2.857-6.758l-.07-.069zM12.03 20.026h-.003c-1.5-.001-2.97-.405-4.248-1.166l-.305-.182-3.222.934.86-3.144-.189-.312a7.925 7.925 0 0 1-1.222-4.222c.006-4.385 3.576-7.96 7.976-7.96 2.13 0 4.13.83 5.636 2.34 1.506 1.509 2.334 3.514 2.33 5.636-.005 4.386-3.576 7.961-7.973 7.961l-.04-.005z" fill="#25D366"/><path d="M16.11 13.454c-.266-.133-1.574-.774-1.818-.863-.244-.089-.422-.133-.599.133-.177.267-.688.863-.843 1.04-.155.178-.31.2-.577.067-.886-.333-1.682-.883-2.256-1.596-.178-.2-.322-.417-.454-.642.056-.033.11-.067.16-.106.088-.066.176-.133.26-.207.295-.257.534-.565.698-.911.027-.056.043-.118.048-.18.005-.063-.008-.127-.036-.185l-.424-.994c-.1-.233-.312-.39-.56-.413-.09-.008-.18-.003-.268.012-.15.021-.294.075-.418.156-.021.014-.041.029-.06.046-.359.316-.653.698-.863 1.127-.015.033-.026.067-.033.102-.094.378-.084.776.029 1.148.331 1.072.92 2.053 1.722 2.862.064.064.13.126.197.187.228.207.469.4.721.578.313.22.645.411.991.571.145.068.293.129.444.184.399.144.812.25 1.232.316.122.02.246.03.369.032.175.003.347-.021.512-.07.18-.048.341-.144.466-.277.192-.197.336-.436.422-.699.043-.133.055-.272.034-.408-.018-.12-.064-.234-.132-.334-.082-.117-.425-.716-.544-.878-.076-.1-.166-.132-.245-.132-.06 0-.12.016-.218.068-.275.146-.483.238-.609.289-.106.043-.187.066-.278-.022-.177-.177-.416-.407-.553-.549-.162-.17-.276-.381-.333-.61.09-.062.235-.15.358-.218.168-.093.31-.195.399-.282.181-.178.275-.409.293-.656.008-.092-.007-.184-.042-.27-.028-.07-.1-.222-.136-.298l-.232-.487c-.04-.084-.078-.168-.115-.253-.025-.058-.065-.11-.116-.148z" fill="#25D366"/></svg>'''
+        vb_svg = '''<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="vertical-align: middle; margin-right: 8px;"><path d="M11.995 2C7.58 2 4 5.58 4 9.995c0 1.732.58 3.415 1.584 4.812L4.5 19.5l4.774-1.125c1.34.82 2.881 1.267 4.53 1.267 4.415 0 8-3.58 8-7.995C21.804 5.58 18.41 2 13.995 2h-2z" fill="#7360F2"/><path d="M15.5 13.4c-.3.3-.7.4-1.1.2-.9-.3-2.3-1.1-3.3-2.2-.9-.9-1.6-1.9-1.9-2.8-.1-.4 0-.8.2-1.1l.5-.5c.3-.3.3-.8 0-1.1l-1.1-1.1c-.3-.3-.8-.3-1.1 0l-.5.5c-.6.6-.8 1.5-.5 2.3.5 1.3 1.5 2.8 2.9 4.2 1.4 1.4 2.9 2.3 4.2 2.9.8.3 1.7.1 2.3-.5l.5-.5c.3-.3.3-.8 0-1.1l-1.1-1.1c-.3-.3-.8-.3-1.1 0l-.5.5z" fill="#FFFFFF"/></svg>'''
         sms_icon = '<span style="font-size:24px; vertical-align:middle; margin-right:8px;">✉️</span>'
         return f"""
-<div style="margin-bottom:20px;"><a href="https://wa.me/{phone}" target="_blank" style="color:#25D366;text-decoration:none;font-size:18px;display:flex;align-items:center;">{wa}<span style="font-weight:bold;color:#25D366;">WhatsApp</span></a></div>
-<div style="margin-bottom:20px;"><a href="viber://chat?number={phone}" target="_blank" style="color:#7360F2;text-decoration:none;font-size:18px;display:flex;align-items:center;">{vb}<span style="font-weight:bold;color:#7360F2;">Viber</span></a></div>
+<div style="margin-bottom:20px;"><a href="https://wa.me/{phone}" target="_blank" style="color:#25D366;text-decoration:none;font-size:18px;display:flex;align-items:center;">{wa_svg}<span style="font-weight:bold;color:#25D366;">WhatsApp</span></a></div>
+<div style="margin-bottom:20px;"><a href="viber://chat?number={phone}" target="_blank" style="color:#7360F2;text-decoration:none;font-size:18px;display:flex;align-items:center;">{vb_svg}<span style="font-weight:bold;color:#7360F2;">Viber</span></a></div>
 <div style="margin-bottom:20px;"><a href="sms:{phone}" style="color:#34B7F1;text-decoration:none;font-size:18px;display:flex;align-items:center;">{sms_icon}<span style="font-weight:bold;color:#34B7F1;">SMS</span></a></div>
 <br>📞 Telefon: {phone}<br>📧 Email: kontakt@zapmoto.rs<br>🕒 Radno vreme: svakoga dana sem nedelje od 10h do 19h"""
 
@@ -325,14 +334,12 @@ class ContextAwareChatbot:
         for item in items:
             q = item['content']['question']
             ans = item['content']['answer']
-            # izvući brend i tip (skuter/motocikl) iz pitanja
             cat = item['content'].get('category','')
             brand_match = re.search(r'Koje su karakteristike (.*?)\?', q)
             brand = brand_match.group(1) if brand_match else q
             key = (brand.lower(), cat)
             if key not in groups or len(ans) < len(groups[key]['content']['answer']):
                 groups[key] = item
-        # vrati samo one koji nisu preterano dugački (limit 600 znakova)
         return [v for v in groups.values() if len(v['content']['answer']) < 600]
 
     def _format_products(self, items: List[Dict], original_query=""):
@@ -350,7 +357,6 @@ class ContextAwareChatbot:
             cena = c.get('cena')
             parts.append(f'<div style="background:#f9fff9; border-left:4px solid #069806; padding:0.8rem; margin:0.8rem 0; border-radius:8px;">')
             parts.append(f'<strong style="font-size:1.1rem;">{i}. <a href="{url}" target="_blank" style="color:#069806;">{name}</a></strong><br>')
-            # glavne karakteristike
             domet = re.search(r'domet do (\d+) km', a)
             snaga = re.search(r'snagu ([\d\.]+) kw', a.lower()) or re.search(r'(\d+(?:\.\d+)?)\s*kw', a.lower())
             snaga = snaga.group(1) if snaga else "?"
@@ -363,7 +369,6 @@ class ContextAwareChatbot:
         return "".join(parts)
 
     def extract_criteria(self, message: str) -> Dict:
-        # koristi OpenAI za izdvajanje
         prompt = f"""
         Iz korisničke poruke izdvoj kriterijume. Vrati JSON:
         {{"kategorija": "skuteri" ili "motocikli" ili null, "min_domet": broj ili null,
@@ -473,11 +478,8 @@ class ContextAwareChatbot:
 
             # ----- ADVICE / RECOMMENDATION -----
             if intent == Intent.PRODUCT_RECOMMENDATION or intent == Intent.ADVICE_NEEDED:
-                # izdvoj kriterijume
                 crit = self.extract_criteria(message)
-                # ako nema dovoljno specifičnosti, pitaj za detalje
                 if not crit['min_domet'] and not crit['kategorija_vozacke'] and not crit['kategorija']:
-                    # postavi potpitanja
                     questions = []
                     if not crit['kategorija_vozacke']:
                         questions.append("Da li imate AM ili A1 vozačku dozvolu?")
@@ -490,9 +492,7 @@ class ContextAwareChatbot:
                     self._add_msg(mem_key, 'assistant', resp, intent='product_recommendation')
                     return {'response':resp, 'intent':'product_recommendation', 'conversation_id':conversation_id,
                             'escalation_needed':False, 'knowledge_sources':[], 'channel_specific':self._channel(channel, resp)}
-                # sačuvaj kriterijume u kontekst
                 conv.context['criteria'] = crit
-                # filtriraj sve proizvode
                 all_prods = [item for item in self.knowledge_base if item.get('source')=='proizvodi']
                 matching = self.filter_models(crit, all_prods)
                 if not matching:
@@ -501,13 +501,11 @@ class ContextAwareChatbot:
                     self._add_msg(mem_key, 'assistant', resp, intent=intent.value)
                     return {'response':resp, 'intent':intent.value, 'conversation_id':conversation_id,
                             'escalation_needed':False, 'knowledge_sources':[], 'channel_specific':self._channel(channel, resp)}
-                # sortiraj po dometu opadajuće
                 def get_dom(m): 
                     d = re.search(r'domet do (\d+) km', m.get('answer',''))
                     return int(d.group(1)) if d else 0
                 matching.sort(key=get_dom, reverse=True)
                 top = matching[:5]
-                # formatiraj preporuke
                 parts = ['<div style="font-family:Lato,sans-serif;"><h3 style="color:#069806;">⚡ Preporučeni modeli:</h3>']
                 for i, m in enumerate(top, 1):
                     q = m.get('question','')
@@ -532,18 +530,15 @@ class ContextAwareChatbot:
                         'escalation_needed':False, 'knowledge_sources':['proizvodi'], 'channel_specific':self._channel(channel, resp)}
 
             # ----- BRAND ONLY -----
-            # ako je poruka samo ime brenda (možda sa upitnikom)
             brands = ['pusa','lipo','deer','e2go','puma','tiger','lion']
             msg_low = message.lower().strip()
             if msg_low in brands or (msg_low[:-1] in brands and msg_low.endswith('?')):
                 brand = msg_low.rstrip('?')
-                # primeni prethodne kriterijume ako postoje
                 crit = conv.context.get('criteria')
                 prods = [item for item in self.knowledge_base if item.get('source')=='proizvodi' and brand in item.get('question','').lower()]
                 if crit:
                     prods = self.filter_models(crit, prods)
                 if prods:
-                    # pretvori u listu za formatiranje
                     items = [{'content':p, 'relevance_score':1.0, 'source':'proizvodi'} for p in prods]
                     resp = self._format_products(items)
                 else:
