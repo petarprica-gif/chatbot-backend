@@ -177,7 +177,7 @@ class ContextAwareChatbot:
         key = os.getenv('WOOCOMMERCE_CONSUMER_KEY')
         secret = os.getenv('WOOCOMMERCE_CONSUMER_SECRET')
         if not key or not secret:
-            logger.info("WooCommerce ključevi nisu podešeni")
+            logger.info("WooCommerce ključevi nisu podešeni – cene neće biti dostupne")
             return
         try:
             url = "https://zapmoto.rs/wp-json/wc/v3/products"
@@ -195,7 +195,7 @@ class ContextAwareChatbot:
                     entry = {"id":2000+added, "question":f"Koje su karakteristike {name}?",
                              "answer":desc, "keywords":name.lower(),
                              "category":cat, "source":"proizvodi",
-                             "cena": p.get('price')}
+                             "cena": p.get('price')}   # <-- cena iz WooCommerce
                     entry['text_for_embedding'] = f"{entry['question']} {desc} {name.lower()}"
                     self.knowledge_base.append(entry)
                     added += 1
@@ -392,13 +392,12 @@ class ContextAwareChatbot:
             if criteria.get('kategorija') and cat != criteria['kategorija']: continue
             if criteria.get('kategorija_vozacke'):
                 voz = criteria['kategorija_vozacke'].lower()
-                if voz == 'am' and cat != 'skuteri': continue   # AM dozvola -> samo skuteri
-                # A1 dozvola dozvoljava i skutere i motocikle – ne filtriramo
+                if voz == 'am' and cat != 'skuteri': continue
+                # A1 dozvoljava sve – ne filtriramo po kategoriji
             if criteria.get('min_domet') or criteria.get('max_domet'):
                 d = re.search(r'domet do (\d+) km', ans)
                 if d:
                     d_int = int(d.group(1))
-                    # Zahteva se STROGO VEĆI domet od traženog
                     if criteria.get('min_domet') and d_int <= criteria['min_domet']: continue
                     if criteria.get('max_domet') and d_int > criteria['max_domet']*1.2: continue
                 else: continue
@@ -442,6 +441,61 @@ class ContextAwareChatbot:
         try:
             mem_key = f"{user_id}:{conversation_id}" if conversation_id else user_id
             conv = self.get_or_create_conversation(mem_key, user_id, channel)
+            # ------------------------------------------------------------
+            # AKTIVNA SESIJA PREPORUKE (nastavak)
+            # ------------------------------------------------------------
+            if conv.context.get('awaiting_recommendation'):
+                # Korisnik je upravo odgovorio na pitanje o dozvoli/dometu
+                crit = self.extract_criteria(message)
+                # Ako nedostaje dozvola ili domet, pitaj ponovo
+                if not crit['min_domet'] or not crit['kategorija_vozacke']:
+                    questions = []
+                    if not crit['min_domet']: questions.append("Koliko kilometara dnevno prelazite?")
+                    if not crit['kategorija_vozacke']: questions.append("Da li imate AM ili A1 vozačku dozvolu?")
+                    resp = "Da bih vam dao najbolju preporuku, potrebno mi je nekoliko informacija.<br>" + "<br>".join(f"• {q}" for q in questions)
+                    self._add_msg(mem_key, 'user', message)
+                    self._add_msg(mem_key, 'assistant', resp, intent='product_recommendation')
+                    return {'response':resp, 'intent':'product_recommendation', 'conversation_id':conversation_id,
+                            'escalation_needed':False, 'knowledge_sources':[], 'channel_specific':self._channel(channel, resp)}
+                # Sačuvaj kriterijume
+                conv.context['criteria'] = crit
+                conv.context['awaiting_recommendation'] = False
+                all_prods = [item for item in self.knowledge_base if item.get('source')=='proizvodi']
+                matching = self.filter_models(crit, all_prods)
+                if not matching:
+                    resp = "Nažalost, nijedan model ne odgovara zadatim kriterijumima. Pokušajte sa manjim dometom ili drugom kategorijom."
+                else:
+                    def get_dom(m): 
+                        d = re.search(r'domet do (\d+) km', m.get('answer',''))
+                        return int(d.group(1)) if d else 0
+                    matching.sort(key=get_dom, reverse=True)
+                    top = matching[:5]
+                    parts = ['<div style="font-family:Lato,sans-serif;"><h3 style="color:#069806;">⚡ Preporučeni modeli:</h3>']
+                    for i, m in enumerate(top, 1):
+                        q = m.get('question','')
+                        name = q.replace("Koje su karakteristike ","").replace("?","").strip()
+                        a = m.get('answer','')
+                        domet = re.search(r'domet do (\d+) km', a).group(1) if re.search(r'domet do (\d+) km', a) else "?"
+                        snaga = re.search(r'snagu ([\d\.]+) kw', a.lower()) or re.search(r'(\d+(?:\.\d+)?)\s*kw', a.lower())
+                        snaga = snaga.group(1) if snaga else "?"
+                        link = re.search(r"https?://[^\s']+", a)
+                        url = link.group(0) if link else "#"
+                        cena = m.get('cena')
+                        parts.append(f'<div style="background:#f0faf0; border-radius:8px; padding:0.7rem; margin:0.5rem 0;">')
+                        parts.append(f'<strong>{i}. <a href="{url}" target="_blank" style="color:#069806;">{name}</a></strong><br>')
+                        parts.append(f'🔋 {snaga} kW | 🛣️ {domet} km')
+                        if cena: parts.append(f' | 💰 {cena} €')
+                        parts.append('</div>')
+                    parts.append('</div>')
+                    resp = "".join(parts)
+                    # Dodatno pitanje za sužavanje (samo ako je A1 dozvola)
+                    if crit.get('kategorija_vozacke') == 'A1':
+                        resp += '<br><br>Da li preferirate skuter ili motocikl? Kolika Vam je maksimalna brzina potrebna?'
+                self._add_msg(mem_key, 'user', message)
+                self._add_msg(mem_key, 'assistant', resp, intent='product_recommendation', knowledge=['proizvodi'])
+                return {'response':resp, 'intent':'product_recommendation', 'conversation_id':conversation_id,
+                        'escalation_needed':False, 'knowledge_sources':['proizvodi'], 'channel_specific':self._channel(channel, resp)}
+
             intent = self.detect_intent(message, conv.messages)
             msg_low = message.lower().strip()
 
@@ -450,7 +504,7 @@ class ContextAwareChatbot:
             if 'kalkulator' in msg_low and not any(w in msg_low for w in ['ušted','uštedeti','izračunaj','proračun']):
                 resp = ('Da, imamo <a href="https://zapmoto.rs/kalkulator-ustede-elektricnim-skuterom/" target="_blank" '
                         'style="color:#069806;">kalkulator uštede</a>. Želite li da izračunamo uštedu? Unesite dnevnu kilometražu.')
-                conv.context['awaiting_savings_km'] = True   # <-- pamti da očekuje broj
+                conv.context['awaiting_savings_km'] = True
                 self._add_msg(mem_key, 'user', message)
                 self._add_msg(mem_key, 'assistant', resp, intent='product_question')
                 return {'response':resp, 'intent':'product_question', 'conversation_id':conversation_id,
@@ -458,7 +512,6 @@ class ContextAwareChatbot:
 
             # 2. Upit o ceni (sadrži "cena" ili "košta")
             if any(w in msg_low for w in ['cena','košta','cenu','cene']):
-                # Pronađi brend (sa deklinacijama)
                 brand_map = {
                     'pusa': ['pusa','puse','pusu','pusom'],
                     'lipo': ['lipo','lipa','lipu','lipom'],
@@ -474,15 +527,12 @@ class ContextAwareChatbot:
                         found_brand = base
                         break
                 if found_brand:
-                    # Traži snagu
                     snaga_match = re.search(r'(\d+(?:[.,]\d+)?)\s*kw', msg_low)
                     snaga = snaga_match.group(1).replace(',','.') if snaga_match else None
-                    # Pretraži bazu
                     prods = [item for item in self.knowledge_base if item.get('source')=='proizvodi' and found_brand in item.get('question','').lower()]
                     if snaga:
                         prods = [p for p in prods if re.search(fr'snagu {snaga} kw', p.get('answer','').lower()) or re.search(fr'{snaga}\s*kw', p.get('answer','').lower())]
                     if prods:
-                        # Uzmi prvi (najrelevantniji)
                         p = prods[0]
                         cena = p.get('cena')
                         name = p['question'].replace("Koje su karakteristike ","").replace("?","")
@@ -497,7 +547,6 @@ class ContextAwareChatbot:
                         self._add_msg(mem_key, 'assistant', resp, intent='product_question', knowledge=['proizvodi'])
                         return {'response':resp, 'intent':'product_question', 'conversation_id':conversation_id,
                                 'escalation_needed':False, 'knowledge_sources':['proizvodi'], 'channel_specific':self._channel(channel, resp)}
-                # Ako brend nije pronađen, nastaviće se normalna obrada
 
             # ====== SAVINGS CALCULATOR ======
             if intent == Intent.SAVINGS_CALCULATOR or conv.context.get('awaiting_savings_km'):
@@ -524,60 +573,21 @@ class ContextAwareChatbot:
                 return {'response':resp, 'intent':intent.value, 'conversation_id':conversation_id,
                         'escalation_needed':False, 'knowledge_sources':['kalkulator'], 'channel_specific':self._channel(channel, resp)}
 
-            # ====== ADVICE / RECOMMENDATION ======
+            # ====== POKRETANJE PREPORUKE (prvo pitanje) ======
             if intent == Intent.PRODUCT_RECOMMENDATION or intent == Intent.ADVICE_NEEDED:
                 crit = self.extract_criteria(message)
-                # Ako nedostaje domet ili dozvola, uvek pitaj
                 if not crit['min_domet'] or not crit['kategorija_vozacke']:
+                    conv.context['awaiting_recommendation'] = True
                     questions = []
-                    if not crit['min_domet']:
-                        questions.append("Koliko kilometara dnevno prelazite?")
-                    if not crit['kategorija_vozacke']:
-                        questions.append("Da li imate AM ili A1 vozačku dozvolu?")
+                    if not crit['min_domet']: questions.append("Koliko kilometara dnevno prelazite?")
+                    if not crit['kategorija_vozacke']: questions.append("Da li imate AM ili A1 vozačku dozvolu?")
                     resp = "Da bih vam dao najbolju preporuku, potrebno mi je nekoliko informacija.<br>" + "<br>".join(f"• {q}" for q in questions)
                     self._add_msg(mem_key, 'user', message)
                     self._add_msg(mem_key, 'assistant', resp, intent='product_recommendation')
                     return {'response':resp, 'intent':'product_recommendation', 'conversation_id':conversation_id,
                             'escalation_needed':False, 'knowledge_sources':[], 'channel_specific':self._channel(channel, resp)}
-                # Sačuvaj kriterijume
-                conv.context['criteria'] = crit
-                all_prods = [item for item in self.knowledge_base if item.get('source')=='proizvodi']
-                matching = self.filter_models(crit, all_prods)
-                if not matching:
-                    resp = "Nažalost, nijedan model ne odgovara zadatim kriterijumima. Pokušajte sa manjim dometom ili drugom kategorijom."
-                    self._add_msg(mem_key, 'user', message)
-                    self._add_msg(mem_key, 'assistant', resp, intent=intent.value)
-                    return {'response':resp, 'intent':intent.value, 'conversation_id':conversation_id,
-                            'escalation_needed':False, 'knowledge_sources':[], 'channel_specific':self._channel(channel, resp)}
-                def get_dom(m): 
-                    d = re.search(r'domet do (\d+) km', m.get('answer',''))
-                    return int(d.group(1)) if d else 0
-                matching.sort(key=get_dom, reverse=True)
-                top = matching[:5]
-                parts = ['<div style="font-family:Lato,sans-serif;"><h3 style="color:#069806;">⚡ Preporučeni modeli:</h3>']
-                for i, m in enumerate(top, 1):
-                    q = m.get('question','')
-                    name = q.replace("Koje su karakteristike ","").replace("?","").strip()
-                    a = m.get('answer','')
-                    domet = re.search(r'domet do (\d+) km', a).group(1) if re.search(r'domet do (\d+) km', a) else "?"
-                    snaga = re.search(r'snagu ([\d\.]+) kw', a.lower()) or re.search(r'(\d+(?:\.\d+)?)\s*kw', a.lower())
-                    snaga = snaga.group(1) if snaga else "?"
-                    link = re.search(r"https?://[^\s']+", a)
-                    url = link.group(0) if link else "#"
-                    cena = m.get('cena')
-                    parts.append(f'<div style="background:#f0faf0; border-radius:8px; padding:0.7rem; margin:0.5rem 0;">')
-                    parts.append(f'<strong>{i}. <a href="{url}" target="_blank" style="color:#069806;">{name}</a></strong><br>')
-                    parts.append(f'🔋 {snaga} kW | 🛣️ {domet} km')
-                    if cena: parts.append(f' | 💰 {cena} €')
-                    parts.append('</div>')
-                parts.append('</div>')
-                resp = "".join(parts)
-                self._add_msg(mem_key, 'user', message)
-                self._add_msg(mem_key, 'assistant', resp, intent=intent.value, knowledge=['proizvodi'])
-                return {'response':resp, 'intent':intent.value, 'conversation_id':conversation_id,
-                        'escalation_needed':False, 'knowledge_sources':['proizvodi'], 'channel_specific':self._channel(channel, resp)}
 
-            # ====== BRAND ONLY (poboljšano prepoznavanje) ======
+            # ====== BRAND ONLY ======
             brands = ['pusa','lipo','deer','e2go','puma','tiger','lion']
             clean_msg = re.sub(r'[^\w\s]', '', msg_low).strip()
             words = clean_msg.split()
