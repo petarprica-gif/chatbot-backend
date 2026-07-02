@@ -263,7 +263,6 @@ class ContextAwareChatbot:
 
         # Fallback OpenAI
         prompt = """Detektuj nameru korisnika. Vrati samo jedno od: greeting, product_question, product_recommendation, order_status, return_request, payment_issue, contact_support, farewell, unknown."""
-        # Pripremi istoriju kao string
         history_text = ""
         for m in history[-5:]:
             history_text += f"{m['role']}: {m['content']}\n"
@@ -303,7 +302,6 @@ class ContextAwareChatbot:
 
     def _format_contact(self):
         phone = "+381603534000"
-        # SVG ikone
         wa_svg = '''<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="vertical-align: middle; margin-right: 8px;"><path d="M19.077 4.928C17.191 3.041 14.683 2 12.006 2 6.798 2 2.548 6.193 2.54 11.393c-.003 1.747.456 3.457 1.328 4.984L2.25 21.75l5.428-1.573c1.472.839 3.137 1.286 4.857 1.288h.004c5.192 0 9.457-4.193 9.465-9.393.004-2.51-.972-4.872-2.857-6.758l-.07-.069zM12.03 20.026h-.003c-1.5-.001-2.97-.405-4.248-1.166l-.305-.182-3.222.934.86-3.144-.189-.312a7.925 7.925 0 0 1-1.222-4.222c.006-4.385 3.576-7.96 7.976-7.96 2.13 0 4.13.83 5.636 2.34 1.506 1.509 2.334 3.514 2.33 5.636-.005 4.386-3.576 7.961-7.973 7.961l-.04-.005z" fill="#25D366"/><path d="M16.11 13.454c-.266-.133-1.574-.774-1.818-.863-.244-.089-.422-.133-.599.133-.177.267-.688.863-.843 1.04-.155.178-.31.2-.577.067-.886-.333-1.682-.883-2.256-1.596-.178-.2-.322-.417-.454-.642.056-.033.11-.067.16-.106.088-.066.176-.133.26-.207.295-.257.534-.565.698-.911.027-.056.043-.118.048-.18.005-.063-.008-.127-.036-.185l-.424-.994c-.1-.233-.312-.39-.56-.413-.09-.008-.18-.003-.268.012-.15.021-.294.075-.418.156-.021.014-.041.029-.06.046-.359.316-.653.698-.863 1.127-.015.033-.026.067-.033.102-.094.378-.084.776.029 1.148.331 1.072.92 2.053 1.722 2.862.064.064.13.126.197.187.228.207.469.4.721.578.313.22.645.411.991.571.145.068.293.129.444.184.399.144.812.25 1.232.316.122.02.246.03.369.032.175.003.347-.021.512-.07.18-.048.341-.144.466-.277.192-.197.336-.436.422-.699.043-.133.055-.272.034-.408-.018-.12-.064-.234-.132-.334-.082-.117-.425-.716-.544-.878-.076-.1-.166-.132-.245-.132-.06 0-.12.016-.218.068-.275.146-.483.238-.609.289-.106.043-.187.066-.278-.022-.177-.177-.416-.407-.553-.549-.162-.17-.276-.381-.333-.61.09-.062.235-.15.358-.218.168-.093.31-.195.399-.282.181-.178.275-.409.293-.656.008-.092-.007-.184-.042-.27-.028-.07-.1-.222-.136-.298l-.232-.487c-.04-.084-.078-.168-.115-.253-.025-.058-.065-.11-.116-.148z" fill="#25D366"/></svg>'''
         vb_svg = '''<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="vertical-align: middle; margin-right: 8px;"><path d="M11.995 2C7.58 2 4 5.58 4 9.995c0 1.732.58 3.415 1.584 4.812L4.5 19.5l4.774-1.125c1.34.82 2.881 1.267 4.53 1.267 4.415 0 8-3.58 8-7.995C21.804 5.58 18.41 2 13.995 2h-2z" fill="#7360F2"/><path d="M15.5 13.4c-.3.3-.7.4-1.1.2-.9-.3-2.3-1.1-3.3-2.2-.9-.9-1.6-1.9-1.9-2.8-.1-.4 0-.8.2-1.1l.5-.5c.3-.3.3-.8 0-1.1l-1.1-1.1c-.3-.3-.8-.3-1.1 0l-.5.5c-.6.6-.8 1.5-.5 2.3.5 1.3 1.5 2.8 2.9 4.2 1.4 1.4 2.9 2.3 4.2 2.9.8.3 1.7.1 2.3-.5l.5-.5c.3-.3.3-.8 0-1.1l-1.1-1.1c-.3-.3-.8-.3-1.1 0l-.5.5z" fill="#FFFFFF"/></svg>'''
         sms_icon = '<span style="font-size:24px; vertical-align:middle; margin-right:8px;">✉️</span>'
@@ -395,12 +393,13 @@ class ContextAwareChatbot:
             if criteria.get('kategorija_vozacke'):
                 voz = criteria['kategorija_vozacke'].lower()
                 if voz == 'am' and cat != 'skuteri': continue   # AM dozvola -> samo skuteri
-                if voz == 'a1' and 'a1 kategorija' not in ans: continue
+                # A1 dozvola dozvoljava i skutere i motocikle – ne filtriramo
             if criteria.get('min_domet') or criteria.get('max_domet'):
                 d = re.search(r'domet do (\d+) km', ans)
                 if d:
                     d_int = int(d.group(1))
-                    if criteria.get('min_domet') and d_int < criteria['min_domet']*0.8: continue
+                    # Zahteva se STROGO VEĆI domet od traženog
+                    if criteria.get('min_domet') and d_int <= criteria['min_domet']: continue
                     if criteria.get('max_domet') and d_int > criteria['max_domet']*1.2: continue
                 else: continue
             res.append(item)
@@ -451,6 +450,7 @@ class ContextAwareChatbot:
             if 'kalkulator' in msg_low and not any(w in msg_low for w in ['ušted','uštedeti','izračunaj','proračun']):
                 resp = ('Da, imamo <a href="https://zapmoto.rs/kalkulator-ustede-elektricnim-skuterom/" target="_blank" '
                         'style="color:#069806;">kalkulator uštede</a>. Želite li da izračunamo uštedu? Unesite dnevnu kilometražu.')
+                conv.context['awaiting_savings_km'] = True   # <-- pamti da očekuje broj
                 self._add_msg(mem_key, 'user', message)
                 self._add_msg(mem_key, 'assistant', resp, intent='product_question')
                 return {'response':resp, 'intent':'product_question', 'conversation_id':conversation_id,
@@ -458,28 +458,38 @@ class ContextAwareChatbot:
 
             # 2. Upit o ceni (sadrži "cena" ili "košta")
             if any(w in msg_low for w in ['cena','košta','cenu','cene']):
-                # Pokušaj da identifikuješ model i snagu
-                brand_match = re.search(r'(\bpusa\b|\blipo\b|\bdeer\b|\be2go\b|\bpuma\b|\btiger\b|\blion\b)', msg_low)
-                if brand_match:
-                    brand = brand_match.group(1)
-                    # Traži snagu (npr. 3kW, 2.4kw)
+                # Pronađi brend (sa deklinacijama)
+                brand_map = {
+                    'pusa': ['pusa','puse','pusu','pusom'],
+                    'lipo': ['lipo','lipa','lipu','lipom'],
+                    'deer': ['deer','deera','deeru','deerom'],
+                    'e2go': ['e2go','e2goa','e2gu'],
+                    'puma': ['puma','pume','pumi','pumom'],
+                    'tiger': ['tiger','tigra','tigru','tigrom'],
+                    'lion': ['lion','liona','lionu','lionom']
+                }
+                found_brand = None
+                for base, variants in brand_map.items():
+                    if any(v in msg_low for v in variants):
+                        found_brand = base
+                        break
+                if found_brand:
+                    # Traži snagu
                     snaga_match = re.search(r'(\d+(?:[.,]\d+)?)\s*kw', msg_low)
-                    snaga = None
-                    if snaga_match:
-                        snaga = snaga_match.group(1).replace(',','.')
+                    snaga = snaga_match.group(1).replace(',','.') if snaga_match else None
                     # Pretraži bazu
-                    prods = [item for item in self.knowledge_base if item.get('source')=='proizvodi' and brand in item.get('question','').lower()]
+                    prods = [item for item in self.knowledge_base if item.get('source')=='proizvodi' and found_brand in item.get('question','').lower()]
                     if snaga:
-                        prods = [p for p in prods if re.search(fr'snagu {snaga} kw', p.get('answer','').lower()) or re.search(fr'{snaga} kw', p.get('answer','').lower())]
+                        prods = [p for p in prods if re.search(fr'snagu {snaga} kw', p.get('answer','').lower()) or re.search(fr'{snaga}\s*kw', p.get('answer','').lower())]
                     if prods:
-                        # Uzmi prvi
+                        # Uzmi prvi (najrelevantniji)
                         p = prods[0]
                         cena = p.get('cena')
+                        name = p['question'].replace("Koje su karakteristike ","").replace("?","")
                         if cena:
-                            resp = f"Cena modela {p['question'].replace('Koje su karakteristike ','').replace('?','')} je {cena} €."
+                            resp = f"Cena modela {name} je {cena} €."
                         else:
-                            resp = f"Cenu modela {p['question'].replace('Koje su karakteristike ','').replace('?','')} možete pogledati na sajtu."
-                        # Dodaj link
+                            resp = f"Cenu modela {name} možete pogledati na sajtu."
                         link = re.search(r"https?://[^\s']+", p.get('answer',''))
                         if link:
                             resp += f' <a href="{link.group(0)}" target="_blank" style="color:#069806;">Detalji</a>'
@@ -487,7 +497,7 @@ class ContextAwareChatbot:
                         self._add_msg(mem_key, 'assistant', resp, intent='product_question', knowledge=['proizvodi'])
                         return {'response':resp, 'intent':'product_question', 'conversation_id':conversation_id,
                                 'escalation_needed':False, 'knowledge_sources':['proizvodi'], 'channel_specific':self._channel(channel, resp)}
-                # Ako nije pronađen, nastavi dalje (neće dati kontakt)
+                # Ako brend nije pronađen, nastaviće se normalna obrada
 
             # ====== SAVINGS CALCULATOR ======
             if intent == Intent.SAVINGS_CALCULATOR or conv.context.get('awaiting_savings_km'):
@@ -517,7 +527,7 @@ class ContextAwareChatbot:
             # ====== ADVICE / RECOMMENDATION ======
             if intent == Intent.PRODUCT_RECOMMENDATION or intent == Intent.ADVICE_NEEDED:
                 crit = self.extract_criteria(message)
-                # ISPRAVKA: ako nedostaje domet ili dozvola, uvek pitaj
+                # Ako nedostaje domet ili dozvola, uvek pitaj
                 if not crit['min_domet'] or not crit['kategorija_vozacke']:
                     questions = []
                     if not crit['min_domet']:
@@ -569,10 +579,8 @@ class ContextAwareChatbot:
 
             # ====== BRAND ONLY (poboljšano prepoznavanje) ======
             brands = ['pusa','lipo','deer','e2go','puma','tiger','lion']
-            # Proveri da li je poruka samo brend (sa eventualnim upitnikom ili prefiksom "a ")
-            clean_msg = re.sub(r'[^\w\s]', '', msg_low).strip()  # ukloni znake interpunkcije
+            clean_msg = re.sub(r'[^\w\s]', '', msg_low).strip()
             words = clean_msg.split()
-            # Ako sadrži samo brend, ili "a brend", ili "brend?"
             for brand in brands:
                 if brand in words and len(words) <= 2:
                     crit = conv.context.get('criteria')
