@@ -45,7 +45,6 @@ class ContextAwareChatbot:
     GAS_MAINT_RATE_RSD = (100/5000 + 325/20000) * KURS_RSD   # ≈ 4.25675 RSD/km
     ELEC_MAINT_RATE_RSD = (325/20000) * KURS_RSD             # ≈ 1.9085 RSD/km
 
-    # Podrazumevani model (Deer 45, 33 Wh/km)
     DEFAULT_MODEL_WH = 33          # Wh/km
     DEFAULT_MODEL_NAME = "Deer 45"
 
@@ -335,17 +334,17 @@ class ContextAwareChatbot:
     # --------------------------- Generisanje odgovora ---------------------------
     def generate_greeting_response(self, message: str, user_id: str, conversation_id: str = None, channel: str = "web") -> Dict[str, Any]:
         greeting_responses = {
-            'dobro jutro': 'Dobro jutro! Kako vam mogu pomoći danas?',
-            'dobar dan': 'Dobar dan! Drago mi je da ste tu. Kako vam mogu pomoći?',
-            'dobro veče': 'Dobro veče! Kako vam mogu pomoći?',
-            'zdravo': 'Zdravo! Dobrodošli. Kako vam mogu pomoći?',
-            'ćao': 'Ćao! Kako vam mogu pomoći?',
-            'cao': 'Ćao! Kako vam mogu pomoći?',
-            'hej': 'Hej! Kako vam mogu pomoći?',
-            'pozdrav': 'Pozdrav! Kako vam mogu pomoći?',
+            'dobro jutro': 'Dobro jutro! ☀️ Kako vam mogu pomoći danas?',
+            'dobar dan': 'Dobar dan! 😊 Kako vam mogu pomoći?',
+            'dobro veče': 'Dobro veče! 🌙 Kako vam mogu pomoći?',
+            'zdravo': 'Zdravo! 👋 Dobrodošli. Kako vam mogu pomoći?',
+            'ćao': 'Ćao! 👋 Kako vam mogu pomoći?',
+            'cao': 'Ćao! 👋 Kako vam mogu pomoći?',
+            'hej': 'Hej! 👋 Kako vam mogu pomoći?',
+            'pozdrav': 'Pozdrav! 👋 Kako vam mogu pomoći?',
         }
         message_lower = message.lower()
-        response_text = "Zdravo! Kako vam mogu pomoći?"
+        response_text = "Zdravo! 👋 Kako vam mogu pomoći?"
         for greeting, response in greeting_responses.items():
             if greeting in message_lower:
                 response_text = response
@@ -437,6 +436,7 @@ class ContextAwareChatbot:
         return ""
 
     def format_product_response(self, relevant_items: List[Dict], original_query: str = "") -> str:
+        """Pregledan prikaz proizvoda sa karticama."""
         if not relevant_items:
             return ""
         kontakt_items = [item for item in relevant_items if item['content'].get('category') == 'kontakt']
@@ -448,16 +448,25 @@ class ContextAwareChatbot:
                 filtered = [item for item in relevant_items if brand in item['content'].get('question', '').lower()]
                 if filtered:
                     relevant_items = filtered
-        response_parts = ["Na osnovu vašeg pitanja, evo relevantnih informacija:"]
+
+        parts = ['<div style="font-family: Lato, sans-serif;">']
+        parts.append('<h3 style="color:#069806;">🛵 Pronađeni modeli:</h3>')
         for idx, item in enumerate(relevant_items, 1):
             content = item['content']
             question = content.get('question', '')
             answer = content.get('answer', '')
             model_name = question.replace("Koje su karakteristike ", "").replace("?", "").strip()
-            response_parts.append(f"<br><br>{idx}. <strong>{model_name}</strong><br>")
-            clean_answer = answer.replace('<a href="', '<a target="_blank" href="')
-            response_parts.append(f"&nbsp;&nbsp;&nbsp;- {clean_answer}<br>")
-        return "".join(response_parts)
+            # kartica
+            parts.append(f'<div style="background:#f9fff9; border-left:4px solid #069806; padding:0.8rem; margin:0.8rem 0; border-radius:8px;">')
+            parts.append(f'<strong style="font-size:1.1rem; color:#1e3a2f;">{idx}. {model_name}</strong><br>')
+            # specifikacije
+            spec_text = answer.replace('<a href="', '<a target="_blank" style="color:#069806;" href="')
+            parts.append(f'<span style="color:#2c3e50;">{spec_text}</span>')
+            if 'cena' in content:
+                parts.append(f'<br><span style="font-weight:bold;">💰 Cena: {content["cena"]}</span>')
+            parts.append('</div>')
+        parts.append('</div>')
+        return "".join(parts)
 
     def _format_attractive_contact(self) -> str:
         phone = "+381603534000"
@@ -492,14 +501,13 @@ class ContextAwareChatbot:
     def offer_contact_options(self, message: str, user_id: str, conversation_id: str = None, channel: str = "web") -> Dict[str, Any]:
         phone = "+381603534000"
         contact_message = f"""
-Nažalost, nemam odgovor na ovo pitanje.
-
-Za dodatnu pomoć, možete nas kontaktirati putem:
-{self._format_attractive_contact()}
-<br>
-Naš tim će vam rado pomoći u najkraćem mogućem roku.
-
-Da li mogu da vam pomognem oko nečeg drugog?
+<div style="font-family: Lato, sans-serif;">
+    <p>Nažalost, nemam odgovor na ovo pitanje.</p>
+    <p>Za dodatnu pomoć, možete nas kontaktirati putem:</p>
+    {self._format_attractive_contact()}
+    <p>Naš tim će vam rado pomoći u najkraćem mogućem roku.</p>
+    <p>Da li mogu da vam pomognem oko nečeg drugog?</p>
+</div>
 """
         memory_key = f"{user_id}:{conversation_id}" if conversation_id else user_id
         self.add_to_conversation(memory_key, {'role': 'user', 'content': message, 'timestamp': datetime.now().isoformat()})
@@ -525,8 +533,9 @@ Da li mogu da vam pomognem oko nečeg drugog?
         def get_domet(m): return int(re.search(r'domet do (\d+) km', m.get('answer', '')).group(1)) if re.search(r'domet do (\d+) km', m.get('answer', '')) else 0
         matching.sort(key=get_domet, reverse=True)
         if not matching:
-            return "Nažalost, trenutno nemamo modele koji odgovaraju tvojim kriterijumima.", []
-        parts = ["Na osnovu tvojih kriterijuma, preporučujem sledeće modele:\n\n"]
+            return "Nažalost, trenutno nemamo modele koji odgovaraju tvojim kriterijumima. 😔", []
+        parts = ['<div style="font-family: Lato, sans-serif;">']
+        parts.append('<h3 style="color:#069806;">⚡ Preporučeni modeli za vas:</h3>')
         recommended_ids = []
         for i, model in enumerate(matching[:5], 1):
             mid = model.get('id')
@@ -540,12 +549,16 @@ Da li mogu da vam pomognem oko nečeg drugog?
             vozacka = "AM" if "am kategorija" in ans.lower() else "A1" if "a1 kategorija" in ans.lower() else "?"
             link = re.search(r"https?://[^\s']+", ans)
             link = link.group(0) if link else "#"
-            parts.append(f"{i}. <a href='{link}' target='_blank' style='color: #069806; text-decoration: underline; font-weight: bold;'>{name}</a> - Snaga: {snaga} kW, Domet: {domet} km, Kategorija: {vozacka}\n\n")
-        parts.append("Ako želiš više informacija o nekom modelu, slobodno pitaj!")
+            parts.append(f'<div style="background:#f0faf0; border-radius:8px; padding:0.7rem; margin:0.5rem 0;">')
+            parts.append(f'<strong>{i}. <a href="{link}" target="_blank" style="color:#069806;">{name}</a></strong><br>')
+            parts.append(f'🔋 Snaga: {snaga} kW | 🛣️ Domet: {domet} km | 🪪 Kategorija: {vozacka}')
+            parts.append('</div>')
+        parts.append('<p>Ako želiš više informacija o nekom modelu, slobodno pitaj! 😊</p>')
+        parts.append('</div>')
         return "".join(parts), recommended_ids
 
     # -----------------------------------------------------------------
-    # KALKULATOR – samo za Deer 45
+    # KALKULATOR – pregledan tabelarni prikaz
     # -----------------------------------------------------------------
     def _parse_daily_km(self, message: str) -> float:
         msg = message.lower()
@@ -573,23 +586,39 @@ Da li mogu da vam pomognem oko nečeg drugog?
         total_elec = elec_cost_year + elec_maint
         savings = total_gas - total_elec
 
-        return f"""📊 **Proračun za {self.DEFAULT_MODEL_NAME} (≈{wh_per_km} Wh/km)**  
-📅 Godišnja kilometraža: **{km_per_year:,.0f} km**  
-
-⛽ **Benzinski skuter:**  
-  💰 Trošak goriva: **{petrol_cost_year:,.0f} RSD**  
-  🔧 Održavanje: **{gas_maint:,.0f} RSD**  
-  📊 UKUPNO: **{total_gas:,.0f} RSD**  
-
-⚡ **{self.DEFAULT_MODEL_NAME}:**  
-  💰 Trošak struje: **{elec_cost_year:,.0f} RSD**  
-  🔧 Održavanje: **{elec_maint:,.0f} RSD**  
-  📊 UKUPNO: **{total_elec:,.0f} RSD**  
-
-💡 **UKUPNA GODIŠNJA UŠTEDA:** **{savings:,.0f} RSD**  
-
-⚠️ *Ušteda za druge modele se razlikuje.*  
-🔗 <a href='https://zapmoto.rs/kalkulator-ustede-elektricnim-skuterom/' target='_blank' style='color: #069806; text-decoration: underline;'>Izračunajte za sve modele u detaljnom kalkulatoru</a>"""
+        return f"""
+<div style="font-family: Lato, sans-serif; background:#ffffff; border-radius:12px; padding:1rem; box-shadow:0 4px 12px rgba(0,0,0,0.05);">
+    <h3 style="color:#069806; margin-top:0;">⚡ Kalkulator uštede – {self.DEFAULT_MODEL_NAME} ({wh_per_km} Wh/km)</h3>
+    <p style="font-size:1.1rem;">📅 Godišnja kilometraža: <strong>{km_per_year:,.0f} km</strong></p>
+    <table style="width:100%; border-collapse: collapse; margin:1rem 0;">
+        <tr style="background:#f0faf0;">
+            <th style="padding:0.6rem; text-align:left;">Stavka</th>
+            <th style="padding:0.6rem; text-align:right;">⛽ Benzinski skuter</th>
+            <th style="padding:0.6rem; text-align:right;">⚡ {self.DEFAULT_MODEL_NAME}</th>
+        </tr>
+        <tr>
+            <td style="padding:0.5rem;">💰 Trošak energenta</td>
+            <td style="padding:0.5rem; text-align:right; color:#c7362b;">{petrol_cost_year:,.0f} RSD</td>
+            <td style="padding:0.5rem; text-align:right; color:#069806;">{elec_cost_year:,.0f} RSD</td>
+        </tr>
+        <tr>
+            <td style="padding:0.5rem;">🔧 Održavanje</td>
+            <td style="padding:0.5rem; text-align:right;">{gas_maint:,.0f} RSD</td>
+            <td style="padding:0.5rem; text-align:right;">{elec_maint:,.0f} RSD</td>
+        </tr>
+        <tr style="font-weight:bold; background:#f0faf0;">
+            <td style="padding:0.5rem;">📊 UKUPNO</td>
+            <td style="padding:0.5rem; text-align:right;">{total_gas:,.0f} RSD</td>
+            <td style="padding:0.5rem; text-align:right;">{total_elec:,.0f} RSD</td>
+        </tr>
+    </table>
+    <div style="background:#e6ffe6; padding:0.8rem; border-radius:8px; text-align:center; margin:1rem 0;">
+        <span style="font-size:1.3rem; font-weight:bold;">💡 UKUPNA GODIŠNJA UŠTEDA: <span style="color:#069806;">{savings:,.0f} RSD</span></span>
+    </div>
+    <p style="font-size:0.9rem;">⚠️ *Ušteda za druge modele se razlikuje.*<br>
+    🔗 <a href="https://zapmoto.rs/kalkulator-ustede-elektricnim-skuterom/" target="_blank" style="color:#069806; text-decoration:underline;">Izračunajte za sve modele u detaljnom kalkulatoru</a></p>
+</div>
+"""
 
     # -----------------------------------------------------------------
     # GLAVNA generate_response
@@ -653,13 +682,14 @@ Da li mogu da vam pomognem oko nečeg drugog?
                 if blog_entries:
                     blog_entries.sort(key=lambda x: x.get('date', '1970-01-01'), reverse=True)
                     top = blog_entries[:5]
-                    parts = ["📰 **Najnovije vesti i članci:**\n"]
+                    parts = ['<div style="font-family: Lato, sans-serif;">📰 <strong>Najnovije vesti i članci:</strong><br>']
                     for i, blog in enumerate(top, 1):
                         title = blog.get('question', 'Bez naslova')
                         answer = blog.get('answer', '')
                         link_match = re.search(r"https?://[^\s']+", answer)
                         link = link_match.group(0) if link_match else "#"
-                        parts.append(f"{i}. <a href='{link}' target='_blank' style='color: #069806; text-decoration: underline;'>{title}</a>\n")
+                        parts.append(f"{i}. <a href='{link}' target='_blank' style='color:#069806;'>{title}</a><br>")
+                    parts.append('</div>')
                     response_text = "".join(parts)
                     self.add_to_conversation(memory_key, {'role': 'user', 'content': message, 'timestamp': datetime.now().isoformat()})
                     self.add_to_conversation(memory_key, {'role': 'assistant', 'content': response_text, 'timestamp': datetime.now().isoformat(), 'intent': intent.value, 'knowledge_used': ['blog']})
@@ -696,7 +726,7 @@ Da li mogu da vam pomognem oko nečeg drugog?
                 }
                 response_text = self.generate_llm_response(message, context)
             elif top_item.get('source') == 'kontakt' or top_item.get('category') == 'kontakt':
-                response_text = f"Naš tim vam stoji na raspolaganju:<br><br>{self._format_attractive_contact()}"
+                response_text = f"<div style='font-family:Lato,sans-serif;'>Naš tim vam stoji na raspolaganju:<br><br>{self._format_attractive_contact()}</div>"
             else:
                 response_text = self.format_product_response(relevant_knowledge, message)
 
@@ -763,7 +793,7 @@ Da li mogu da vam pomognem oko nečeg drugog?
             )
             response_text = response.choices[0].message.content.strip()
             response_text = re.sub(r'\[([^\]]+)\]\(([^)]+)\)', r'<a href="\2" target="_blank" style="color: #069806; text-decoration: underline;">\1</a>', response_text)
-            return response_text
+            return f'<div style="font-family: Lato, sans-serif;">{response_text}</div>'
         except Exception as e:
             logger.error(f"Greška pri generisanju odgovora: {str(e)}")
             return "Izvinite, došlo je do tehničke greške."
